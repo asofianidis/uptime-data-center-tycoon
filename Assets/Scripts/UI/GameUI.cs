@@ -6,7 +6,7 @@ namespace DCT
 {
     public partial class GameUI : MonoBehaviour
     {
-        public enum Window { None, Market, Contracts, Research, Finance, Staff, Log, Menu, Help, Goals, Dashboard, Settings, SaveLoad, Achievements }
+        public enum Window { None, Market, Contracts, Research, Finance, Staff, Log, Menu, Help, Goals, Dashboard, Settings, SaveLoad, Achievements, Sites }
 
         public GameManager gm;
         public Window window;
@@ -147,7 +147,8 @@ namespace DCT
                 if (buildMenuOpen) DrawBuildMenu();
                 if (roomMenuOpen) DrawRoomMenu();
                 DrawInspector();
-                if (showObjectives) DrawObjectives();
+                if (S.tutorial) DrawTutorial();
+                else { gm.view.HideHint(); if (showObjectives && S.activeSite == 0) DrawObjectives(); }
                 DrawToasts();
                 DrawWindow();
                 DrawToolHint();
@@ -275,11 +276,12 @@ namespace DCT
                 GUILayout.EndVertical();
                 GUILayout.Space(6);
                 ScenarioPicker();
+                if (GUILayout.Button((tutorialChoice ? "[x] " : "[ ] ") + "Guided tutorial (recommended for your first game)", tutorialChoice ? btnOn : btnSmall)) tutorialChoice = !tutorialChoice;
                 GUILayout.FlexibleSpace();
                 GUILayout.BeginHorizontal();
                 if (Button("Back", true, GUILayout.Height(36), GUILayout.Width(120))) newGamePanel = false;
                 GUILayout.FlexibleSpace();
-                if (Button("Start", true, GUILayout.Height(36), GUILayout.Width(200))) { newGamePanel = false; GUIUtility.keyboardControl = 0; gm.StartNewGame(seed, difficulty, scenarioId); }
+                if (Button("Start", true, GUILayout.Height(36), GUILayout.Width(200))) { newGamePanel = false; GUIUtility.keyboardControl = 0; gm.StartNewGame(seed, difficulty, scenarioId); S.tutorial = tutorialChoice; S.tutorialStep = 0; tutSteps = null; }
                 GUILayout.EndHorizontal();
                 GUILayout.EndArea();
             }
@@ -298,6 +300,7 @@ namespace DCT
             GUILayout.Label(Money(S.money), new GUIStyle(header) { normal = { textColor = S.money >= 0 ? new Color(0.45f, 1f, 0.55f) : new Color(1f, 0.4f, 0.35f) } }, GUILayout.Width(130));
             GUILayout.Label($"{(daily >= 0 ? "+" : "")}{Money(daily)}/day", daily >= 0 ? lblGood : lblBad, GUILayout.Width(110));
             GUILayout.Label(S.DateString(), lblBold, GUILayout.Width(150));
+            SiteButton();
 
             string[] sp = { "II", "1x", "3x", "9x", "24x" };
             for (int i = 0; i < sp.Length; i++)
@@ -347,7 +350,7 @@ namespace DCT
             GUILayout.Label("BUILD", lblDim);
             if (GUILayout.Button("Select  [Esc]", gm.tool == Tool.Select ? btnOn : btn)) { gm.SetTool(Tool.Select); buildMenuOpen = roomMenuOpen = false; }
             if (GUILayout.Button("Foundation  [F]", gm.tool == Tool.Foundation ? btnOn : btn)) { gm.SetTool(Tool.Foundation); buildMenuOpen = roomMenuOpen = false; }
-            if (GUILayout.Button("Rooms", gm.tool == Tool.Room || roomMenuOpen ? btnOn : btn)) { roomMenuOpen = !roomMenuOpen; buildMenuOpen = false; if (roomMenuOpen) { gm.SetTool(Tool.Room); window = Window.None; } }
+            if (GUILayout.Button("Rooms", gm.tool == Tool.Room || gm.tool == Tool.Tray || gm.tool == Tool.Raised || roomMenuOpen ? btnOn : btn)) { roomMenuOpen = !roomMenuOpen; buildMenuOpen = false; if (roomMenuOpen) { gm.SetTool(Tool.Room); window = Window.None; } }
             if (GUILayout.Button("Equipment  [B]", buildMenuOpen || gm.tool == Tool.Place ? btnOn : btn)) ToggleBuildMenu();
             if (GUILayout.Button("Demolish  [X]", gm.tool == Tool.Demolish ? btnOn : btn)) { gm.SetTool(Tool.Demolish); buildMenuOpen = roomMenuOpen = false; }
             GUILayout.Space(8);
@@ -372,7 +375,7 @@ namespace DCT
 
         void DrawRoomMenu()
         {
-            var r = Reg(new Rect(180, 52, 250, 300));
+            var r = Reg(new Rect(180, 52, 250, 420));
             GUILayout.BeginArea(r, panel);
             GUILayout.Label("Paint Rooms", header);
             GUILayout.Label("Drag over building foundation.", lblDim);
@@ -391,7 +394,8 @@ namespace DCT
                 RoomType.Office => "Technician desks.",
                 _ => "Plain corridor (free).",
             };
-            GUILayout.Label(desc, lblDim);
+            if (gm.tool == Tool.Room) GUILayout.Label(desc, lblDim);
+            InfraTools();
             GUILayout.EndArea();
         }
 
@@ -903,6 +907,7 @@ namespace DCT
                 Window.Staff => "Staff & Land",
                 Window.Goals => "Goals & Achievements",
                 Window.Dashboard => "Dashboard",
+                Window.Sites => "Sites",
                 Window.Log => "Event Log",
                 _ => ""
             }, header);
@@ -918,6 +923,7 @@ namespace DCT
                 case Window.Staff: StaffWindow2(); break;
                 case Window.Goals: GoalsWindow(); break;
                 case Window.Dashboard: DashboardWindow(); break;
+                case Window.Sites: SitesWindow(); break;
                 case Window.Log: LogWindow(); break;
             }
             GUILayout.EndArea();
@@ -1366,6 +1372,15 @@ Hardware fails more often after ~1.5 years and resells for less. Refresh old dev
 EVENTS
 Fires (install Fire Suppression in every hall), coolant leaks, DDoS, chip shortages, price wars, bankruptcies, break-ins, storms and new carbon levies keep things interesting.
 
+SITES
+From reputation level 4 you can open data centers in other cities (Sites button in the top bar). Each site has its own climate, power prices, grid events, land and staff. Contracts can use racks in any site; geo-redundant customers need racks in at least two.
+
+CABLE TRAYS & RAISED FLOORS
+Rooms & Infra > Cable Trays: overhead trays halve cabling cost, avoid the loose-cable heat penalty and are required for runs over 14 tiles. Raised floors protect server halls from floods and boost cooling.
+
+SHIFTS & BATTERIES
+Staff work day (07-19) or night (19-07) shifts and share desks across shifts; tired staff slow down. Battery storage charges on cheap night power, discharges at the evening peak and backs up outages.
+
 GOALS
 Pick a scenario at New Game for a specific challenge, earn achievements, and take your company public once you're big enough.
 
@@ -1397,6 +1412,8 @@ Ctrl+Z: undo the last build action. O: cycle overlays. All keys can be rebound i
                 {
                     Sim.popups.Dequeue();
                     opt.Value?.Invoke();
+                    Sim.company.BindActive();
+                    Sim.Recompute();
                     break;
                 }
             }

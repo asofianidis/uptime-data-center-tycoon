@@ -22,9 +22,15 @@ sign procedurally generated customer contracts, assign racks/servers to them, an
 - **Events**: outages, storms, heat waves, fires (fire suppression), coolant leaks, DDoS, chip/GPU shortages,
   price wars, bankruptcies, break-ins, carbon levies, grants.
 - **Hardware aging**: failure rates rise after ~1.5 years; refresh old gear.
+- **Multiple sites**: from level 4, open data centers in other procedurally generated cities (own climate,
+  power prices, grid events, land and staff). Contracts can use racks in any site; geo-redundant customers need two.
+- **Infrastructure**: overhead cable trays (cheaper cabling, required for runs over 14 tiles, cables follow them),
+  raised floors (flood protection, cooling bonus), battery storage that charges off-peak and covers outages.
+- **Shifts & fatigue**: day and night shifts share desks; tired staff slow down.
 - **Progression**: 10 reputation levels, research tree, **6 scenarios**, 18 **achievements**, score, **IPO**.
+- **Interactive tutorial**: 15 guided steps with world highlights (toggle on New Game).
 - **Quality of life**: undo (Ctrl+Z), 6 overlays (heat, power, network, customer, age, airflow), dashboard
-  charts, 3 save slots + autosave, settings (UI scale, audio, toggles, **key rebinding**), guided objectives.
+  charts, 3 save slots + autosave with thumbnails, settings (UI scale, audio, toggles, **key rebinding**), guided objectives.
 - **Presentation**: Blender-made equipment models, walking staff, day/night, rain/snow, procedural audio.
 
 ## Controls (defaults, all rebindable)
@@ -35,12 +41,13 @@ Space pause · 1-4 speed · F5/F9 quick save/load · Shift+click or box-drag to 
 
 ## Code layout
 - `Assets/Scripts/Data` – catalog (`Defs.cs`) and serializable save state (`GameState.cs`).
-- `Assets/Scripts/Sim` – `Simulation.cs` (power, cooling, network, contracts/SLA, failures, events, economy,
+- `Assets/Scripts/Sim` – `SimCompany.cs` (company layer: multi-site tick order, cross-site contract
+  provisioning, site management), `Simulation.cs` (per-site power, cooling, network, contracts/SLA, failures, events, economy,
   player actions), `SimSystems.cs` (airflow, redundancy, energy, staff, tickets, rivals, negotiation, aging,
   weather, scenarios, achievements), `ProcGen.cs` (cities, lots, customers, contracts).
 - `Assets/Scripts/View` – `WorldView*.cs` (world rendering, overlays, staff, environment), `Models.cs`
   (procedural fallback meshes), `CameraController.cs`.
-- `Assets/Scripts/UI` – `GameUI.cs`, `GameUI2.cs` (IMGUI).
+- `Assets/Scripts/UI` – `GameUI.cs`, `GameUI2.cs`, `GameUI3.cs` (IMGUI; sites, tutorial, thumbnails in GameUI3).
 - `Assets/Scripts/Core` – `GameManager.cs` (bootstrap, time, tools, undo, save/load), `Settings.cs`
   (preferences, key bindings, rack templates), `AudioFx.cs` (procedural audio), `AutoManager.cs` (scripted
   player used by tests and screenshots).

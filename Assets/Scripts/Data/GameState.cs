@@ -1,10 +1,31 @@
 using System;
 using System.Collections.Generic;
+using UnityEngine;
 
 namespace DCT
 {
     public enum ContractType { Colocation, Dedicated, Compute, Storage, GpuCloud }
     public enum ContractStatus { Offer, Setup, Active, Completed, Cancelled }
+
+    /// <summary>Everything that belongs to one physical data center site.</summary>
+    [Serializable]
+    public class SiteData
+    {
+        public string name;
+        public CityProfile city;
+        public int mapW = 64, mapH = 48;
+        public int ownX0, ownY0, ownX1, ownY1;
+        public int[] rooms;
+        public int[] obstacles;
+        public int[] flags;
+        public List<PlacedObject> objects = new List<PlacedObject>();
+        public List<StaffMember> staff = new List<StaffMember>();
+        public List<ActiveEvent> events = new List<ActiveEvent>();
+        public string weather = "Clear";
+        public float monthSolarKWh, monthGridKWh;
+        public int landPurchases;
+        public int openedHour;
+    }
 
     [Serializable]
     public class CityProfile
@@ -45,6 +66,7 @@ namespace DCT
         public int linkCore2 = -1;     // redundant uplink
         public bool dualPdu;           // redundant power feed
         public bool pduTripped;
+        public float charge;           // battery storage state of charge (kWh)
         public bool failed;
         public int repairLeft;
         public int placedOrder;
@@ -94,6 +116,7 @@ namespace DCT
         public float earned;
         public string lastIssue;
         public bool redundant;          // requires dual power, dual ToR, dual uplink on every rack
+        public bool geoRedundant;       // requires online racks in at least two sites
         public float satisfaction = 70f;
         public bool negotiated;
         public bool referral;
@@ -109,7 +132,9 @@ namespace DCT
         public float salary;
         public float x, y;             // tile-space position
         public float px, py;           // previous-hour position (for smooth rendering)
-        public string state = "idle";  // idle, walking, working
+        public string state = "idle";  // idle, walking, working, returning, off
+        public string shift = "Day";   // Day (07-19) or Night (19-07)
+        public float fatigue;
         public int taskObj = -1, taskDev = -1, taskTicket = -1;
         public float work;
         public List<int> path = new List<int>();
@@ -170,6 +195,7 @@ namespace DCT
         public int endHour;
         public float magnitude;
         public string label;
+        public bool global;
     }
 
     [Serializable]
@@ -232,8 +258,87 @@ namespace DCT
         public string scenario = "sandbox";
         public bool scenarioDone;
         public bool ipo;
-        public int ticketsDone, ticketsMissed, firesFought, outagesSurvived;
+        public int ticketsDone, ticketsMissed, firesFought, outagesSurvived, floodsSurvived;
         public float peakMonthlyRevenue;
+
+        // ---- multi-site ----
+        public int[] flags;                                // per tile: 1 = cable tray, 2 = raised floor
+        public string siteName = "HQ";
+        public List<SiteData> sites = new List<SiteData>();
+        public int activeSite;
+        public bool tutorial;
+        public int tutorialStep;
+        [NonSerialized] public int bound = -1;
+
+        public const int FlagTray = 1, FlagRaised = 2;
+        public bool HasFlag(int x, int y, int f) => InBounds(x, y) && flags != null && (flags[y * mapW + x] & f) != 0;
+
+        /// <summary>Creates the site list for new games and for saves made before multi-site support.</summary>
+        public void EnsureSites()
+        {
+            if (flags == null || flags.Length != mapW * mapH) flags = new int[mapW * mapH];
+            if (sites.Count == 0)
+            {
+                var d = new SiteData();
+                bound = 0;
+                activeSite = 0;
+                sites.Add(d);
+                StoreTo(d);
+                d.name = string.IsNullOrEmpty(siteName) ? "HQ" : siteName;
+            }
+            else
+            {
+                // The top-level fields are authoritative for the active site (they were serialized while bound).
+                bound = Mathf.Clamp(activeSite, 0, sites.Count - 1);
+                activeSite = bound;
+                StoreTo(sites[bound]);
+            }
+            foreach (var s in sites)
+                if (s.flags == null || s.flags.Length != s.mapW * s.mapH) s.flags = new int[s.mapW * s.mapH];
+        }
+
+        /// <summary>Swaps the given site's data into the top-level fields so per-site code can run on it.</summary>
+        public void Bind(int i)
+        {
+            if (bound == i) return;
+            if (bound >= 0 && bound < sites.Count) StoreTo(sites[bound]);
+            LoadFrom(sites[i]);
+            bound = i;
+        }
+
+        public void SyncForSave() { if (bound >= 0 && bound < sites.Count) StoreTo(sites[bound]); }
+
+        public string Serialize()
+        {
+            int was = bound;
+            if (was != activeSite && activeSite < sites.Count) Bind(activeSite);
+            SyncForSave();
+            string json = UnityEngine.JsonUtility.ToJson(this);
+            if (was >= 0 && was != bound) Bind(was);
+            return json;
+        }
+
+        void StoreTo(SiteData d)
+        {
+            d.city = city; d.mapW = mapW; d.mapH = mapH;
+            d.ownX0 = ownX0; d.ownY0 = ownY0; d.ownX1 = ownX1; d.ownY1 = ownY1;
+            d.rooms = rooms; d.obstacles = obstacles; d.flags = flags;
+            d.objects = objects; d.staff = staff; d.events = events;
+            d.weather = weather; d.monthSolarKWh = monthSolarKWh; d.monthGridKWh = monthGridKWh;
+            d.landPurchases = landPurchases;
+            d.name = siteName;
+        }
+
+        void LoadFrom(SiteData d)
+        {
+            city = d.city; mapW = d.mapW; mapH = d.mapH;
+            ownX0 = d.ownX0; ownY0 = d.ownY0; ownX1 = d.ownX1; ownY1 = d.ownY1;
+            rooms = d.rooms; obstacles = d.obstacles; flags = d.flags;
+            objects = d.objects; staff = d.staff; events = d.events;
+            weather = d.weather; monthSolarKWh = d.monthSolarKWh; monthGridKWh = d.monthGridKWh;
+            landPurchases = d.landPurchases;
+            siteName = d.name;
+        }
 
         public int Day => hour / Catalog.HoursPerDay;
         public int Month => Day / Catalog.DaysPerMonth;

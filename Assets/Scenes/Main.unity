@@ -119,7 +119,7 @@ NavMeshSettings:
     debug:
       m_Flags: 0
   m_NavMeshData: {fileID: 0}
---- !u!1 &90801822
+--- !u!1 &640809291
 GameObject:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
@@ -127,122 +127,9 @@ GameObject:
   m_PrefabAsset: {fileID: 0}
   serializedVersion: 6
   m_Component:
-  - component: {fileID: 90801824}
-  - component: {fileID: 90801823}
-  m_Layer: 0
-  m_Name: GameManager
-  m_TagString: Untagged
-  m_Icon: {fileID: 0}
-  m_NavMeshLayer: 0
-  m_StaticEditorFlags: 0
-  m_IsActive: 1
---- !u!114 &90801823
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 90801822}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: c164aae1537951442a086d395524aa7d, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: Assembly-CSharp::DCT.GameManager
-  view: {fileID: 0}
-  cam: {fileID: 0}
-  ui: {fileID: 0}
-  sun: {fileID: 0}
-  inGame: 0
-  speed: 1
-  tool: 0
-  roomType: 2
-  placeDef:
-    id: 
-    name: 
-    desc: 
-    kind: 0
-    room: 0
-    w: 1
-    h: 1
-    cost: 0
-    watts: 0
-    coolingKW: 0
-    supplyKW: 0
-    backupKW: 0
-    bandwidth: 0
-    monthly: 0
-    ports: 0
-    portGbps: 0
-    rackU: 0
-    rackKW: 0
-    staff: 0
-    model: 
-    level: 1
-    research: 0
-    color: {r: 0.5, g: 0.5, b: 0.5, a: 1}
-  placeRot: 0
-  hoverTile: {x: -1, y: -1}
-  hoverObject:
-    id: 0
-    def: 
-    x: 0
-    y: 0
-    rot: 0
-    devices: []
-    contractId: -1
-    linkCore: -1
-    linkCore2: -1
-    dualPdu: 0
-    pduTripped: 0
-    failed: 0
-    repairLeft: 0
-    placedOrder: 0
-  dragging: 0
-  dragStart: {x: 0, y: 0}
-  toolHint: 
-  connectFrom:
-    id: 0
-    def: 
-    x: 0
-    y: 0
-    rot: 0
-    devices: []
-    contractId: -1
-    linkCore: -1
-    linkCore2: -1
-    dualPdu: 0
-    pduTripped: 0
-    failed: 0
-    repairLeft: 0
-    placedOrder: 0
-  connectSecondary: 0
-  audio: {fileID: 0}
---- !u!4 &90801824
-Transform:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 90801822}
-  serializedVersion: 2
-  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: 0, y: 0, z: 0}
-  m_LocalScale: {x: 1, y: 1, z: 1}
-  m_ConstrainProportionsScale: 0
-  m_Children: []
-  m_Father: {fileID: 0}
-  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
---- !u!1 &2017814646
-GameObject:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  serializedVersion: 6
-  m_Component:
-  - component: {fileID: 2017814649}
-  - component: {fileID: 2017814648}
-  - component: {fileID: 2017814647}
+  - component: {fileID: 640809294}
+  - component: {fileID: 640809293}
+  - component: {fileID: 640809292}
   m_Layer: 0
   m_Name: Main Camera
   m_TagString: MainCamera
@@ -250,21 +137,21 @@ GameObject:
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
   m_IsActive: 1
---- !u!81 &2017814647
+--- !u!81 &640809292
 AudioListener:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 2017814646}
+  m_GameObject: {fileID: 640809291}
   m_Enabled: 1
---- !u!20 &2017814648
+--- !u!20 &640809293
 Camera:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 2017814646}
+  m_GameObject: {fileID: 640809291}
   m_Enabled: 1
   serializedVersion: 2
   m_ClearFlags: 1
@@ -309,13 +196,129 @@ Camera:
   m_OcclusionCulling: 1
   m_StereoConvergence: 10
   m_StereoSeparation: 0.022
---- !u!4 &2017814649
+--- !u!4 &640809294
 Transform:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 2017814646}
+  m_GameObject: {fileID: 640809291}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!1 &2028573862
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 2028573864}
+  - component: {fileID: 2028573863}
+  m_Layer: 0
+  m_Name: GameManager
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!114 &2028573863
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2028573862}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: c164aae1537951442a086d395524aa7d, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Uptime::DCT.GameManager
+  view: {fileID: 0}
+  cam: {fileID: 0}
+  ui: {fileID: 0}
+  sun: {fileID: 0}
+  inGame: 0
+  speed: 1
+  tool: 0
+  roomType: 2
+  placeDef:
+    id: 
+    name: 
+    desc: 
+    kind: 0
+    room: 0
+    w: 1
+    h: 1
+    cost: 0
+    watts: 0
+    coolingKW: 0
+    supplyKW: 0
+    backupKW: 0
+    bandwidth: 0
+    monthly: 0
+    ports: 0
+    portGbps: 0
+    rackU: 0
+    rackKW: 0
+    staff: 0
+    model: 
+    capacityKWh: 0
+    level: 1
+    research: 0
+    color: {r: 0.5, g: 0.5, b: 0.5, a: 1}
+  placeRot: 0
+  hoverTile: {x: -1, y: -1}
+  hoverObject:
+    id: 0
+    def: 
+    x: 0
+    y: 0
+    rot: 0
+    devices: []
+    contractId: -1
+    linkCore: -1
+    linkCore2: -1
+    dualPdu: 0
+    pduTripped: 0
+    charge: 0
+    failed: 0
+    repairLeft: 0
+    placedOrder: 0
+  dragging: 0
+  dragStart: {x: 0, y: 0}
+  toolHint: 
+  connectFrom:
+    id: 0
+    def: 
+    x: 0
+    y: 0
+    rot: 0
+    devices: []
+    contractId: -1
+    linkCore: -1
+    linkCore2: -1
+    dualPdu: 0
+    pduTripped: 0
+    charge: 0
+    failed: 0
+    repairLeft: 0
+    placedOrder: 0
+  connectSecondary: 0
+  audio: {fileID: 0}
+--- !u!4 &2028573864
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2028573862}
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
   m_LocalPosition: {x: 0, y: 0, z: 0}
@@ -328,5 +331,5 @@ Transform:
 SceneRoots:
   m_ObjectHideFlags: 0
   m_Roots:
-  - {fileID: 2017814649}
-  - {fileID: 90801824}
+  - {fileID: 640809294}
+  - {fileID: 2028573864}

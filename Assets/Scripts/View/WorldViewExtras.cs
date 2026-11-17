@@ -158,7 +158,7 @@ namespace DCT
                     v.body = body.transform;
                     staffViews[m.id] = v;
                 }
-                v.go.SetActive(Settings.ShowStaff);
+                v.go.SetActive(Settings.ShowStaff && m.state != "off");
                 var pos = new Vector3(Mathf.Lerp(m.px, m.x, t), 0, Mathf.Lerp(m.py, m.y, t));
                 var delta = pos - v.lastPos;
                 if (delta.sqrMagnitude > 0.0001f) v.facing = Mathf.Atan2(delta.x, delta.z) * Mathf.Rad2Deg;

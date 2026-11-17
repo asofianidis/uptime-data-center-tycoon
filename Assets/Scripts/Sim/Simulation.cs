@@ -19,6 +19,7 @@ namespace DCT
         public bool empty;
         public bool colo;
         public float airflow = 1f;
+        public bool looseCabling;
         public string airflowNote;
         public bool redundant;
         public bool degraded;      // running on one path of a redundant pair
@@ -31,6 +32,7 @@ namespace DCT
         public float heatKW, coolKW, temp = 21f;
         public Vector2 center;
         public bool suppressed;
+        public float raisedFrac;
     }
 
     public class Provision
@@ -59,32 +61,68 @@ namespace DCT
         public int[] zoneOf;
         public List<ZoneInfo> zones = new List<ZoneInfo>();
         public readonly Dictionary<int, RackInfo> racks = new Dictionary<int, RackInfo>();
-        public readonly Dictionary<int, Provision> provision = new Dictionary<int, Provision>();
+        public Dictionary<int, Provision> provision => company.provision;
+
+        // ---- multi-site ----
+        public Company company;
+        public int siteIndex;
+        public SiteData Site => S.sites[siteIndex];
+        public void Bind() => S.Bind(siteIndex);
+        bool inSiteTick;
+        public float siteHourlyCost;
+        public float SiteEventMag(string type, float def) { var e = Site.events.FirstOrDefault(x => x.type == type); return e != null ? e.magnitude : def; }
         public readonly Dictionary<int, int> coreUsage = new Dictionary<int, int>();
 
         public float loadKW, itLoadKW, facilityKW, supplyKW, transformerKW, switchgearKW, upsKW, genKW, availableKW;
         public float ispGbps, ispNominal, bwDemand, netQuality = 1f, coolCapKW, heatKW;
         public int corePorts, corePortsUsed, deskCount;
         public bool outageActive, outageLong, powerShort;
-        public float hourlyIncome, hourlyCost;
+        public float hourlyIncome { get => company.hourlyIncome; set => company.hourlyIncome = value; }
+        public float hourlyCost { get => company.hourlyCost; set => company.hourlyCost = value; }
 
         public int tilesVersion = 1, objectsVersion = 1;
         public readonly HashSet<int> dirtyObjects = new HashSet<int>();
-        public readonly Queue<Popup> popups = new Queue<Popup>();
-        public event Action<string, int> OnLog;
+        public Queue<Popup> popups => company.popups;
+        public event Action<string, int> OnLog { add => company.OnLog += value; remove => company.OnLog -= value; }
 
         bool zonesDirty = true;
         int placeCounter;
 
         public float FailureMul => S.difficulty == "Easy" ? 0.6f : S.difficulty == "Hard" ? 1.4f : 1f;
 
+        /// <summary>Creates the company with one simulation per site and returns the active site's simulation.</summary>
         public Simulation(GameState state)
         {
             S = state;
-            rng = new System.Random(state.seed * 7919 + state.hour);
+            state.EnsureSites();
+            company = new Company(state);
+            siteIndex = Mathf.Clamp(state.activeSite, 0, state.sites.Count - 1);
+            for (int i = 0; i < state.sites.Count; i++) company.sims.Add(i == siteIndex ? this : null);
+            for (int i = 0; i < state.sites.Count; i++)
+                if (i != siteIndex) company.sims[i] = new Simulation(state, company, i);
+            InitSite();
+            company.BindActive();
+            foreach (var sim in company.sims) { sim.Bind(); sim.Recompute(); }
+            company.BindActive();
+        }
+
+        Simulation(GameState state, Company c, int site)
+        {
+            S = state;
+            company = c;
+            siteIndex = site;
+            InitSite();
+        }
+
+        internal static Simulation CreateSite(GameState state, Company c, int site) => new Simulation(state, c, site);
+
+        void InitSite()
+        {
+            Bind();
+            rng = new System.Random(S.seed * 7919 + S.hour + siteIndex * 104729);
             RebuildIndex();
             EnsureRivals();
-            Recompute();
+            if (company.sims.All(x => x != null)) Recompute();
             if (S.candidates.Count == 0) RefreshCandidates();
         }
 
@@ -156,9 +194,10 @@ namespace DCT
 
         public void Log(string text, int severity = 0)
         {
+            if (inSiteTick && company.MultiSite) text = $"[{S.siteName}] {text}";
             S.log.Add(new LogEntry { hour = S.hour, text = text, severity = severity });
             if (S.log.Count > 300) S.log.RemoveRange(0, S.log.Count - 300);
-            OnLog?.Invoke(text, severity);
+            company.RaiseLog(text, severity);
         }
 
         public bool Spend(float amount, bool capex = true)
@@ -202,11 +241,11 @@ namespace DCT
         {
             get
             {
-                if (rackCache == null || rackCacheVersion != objectsVersion || rackCacheCount != S.objects.Count)
+                if (rackCache == null || rackCacheVersion != objectsVersion || rackCacheCount != Site.objects.Count)
                 {
-                    rackCache = S.objects.Where(o => Catalog.Facility(o.def)?.kind == FacilityKind.Rack).ToList();
+                    rackCache = Site.objects.Where(o => Catalog.Facility(o.def)?.kind == FacilityKind.Rack).ToList();
                     rackCacheVersion = objectsVersion;
-                    rackCacheCount = S.objects.Count;
+                    rackCacheCount = Site.objects.Count;
                 }
                 return rackCache;
             }
@@ -259,8 +298,12 @@ namespace DCT
                     }
                 }
                 z.center = c / Mathf.Max(1, z.tiles.Count);
+                int raised = 0;
+                foreach (var t in z.tiles) if (S.flags != null && (S.flags[t] & GameState.FlagRaised) != 0) raised++;
+                z.raisedFrac = raised / (float)Mathf.Max(1, z.tiles.Count);
                 z.temp = nT > 0 ? sumT / nT : 21f;
             }
+            RebuildTrayComponents();
             zonesDirty = false;
         }
 
@@ -272,6 +315,7 @@ namespace DCT
 
             transformerKW = switchgearKW = upsKW = genKW = ispNominal = 0;
             corePorts = 0; deskCount = 0; facilityKW = 0; coolCapKW = 0;
+            batteryKW = 0; batteryCapKWh = 0; batteryChargeKWh = 0;
             foreach (var z in zones) { z.coolKW = 0; z.heatKW = 0; }
             float heatMul = EventMag("heatwave", 1f) * S.city.coolingFactor;
 
@@ -290,13 +334,14 @@ namespace DCT
                     case FacilityKind.Isp: ispNominal += d.bandwidth; break;
                     case FacilityKind.CoreSwitch: corePorts += d.ports; break;
                     case FacilityKind.Desk: deskCount += d.staff; break;
+                    case FacilityKind.Battery: if (o.charge > 1f) batteryKW += d.supplyKW; batteryCapKWh += d.capacityKWh; batteryChargeKWh += o.charge; break;
                     case FacilityKind.Suppression:
                         int sz = ZoneAt(o);
                         if (sz >= 0) zones[sz].suppressed = true;
                         break;
                     case FacilityKind.Cooling:
                         int zi = ZoneAt(o);
-                        if (zi >= 0) zones[zi].coolKW += d.coolingKW * heatMul;
+                        if (zi >= 0) zones[zi].coolKW += d.coolingKW * heatMul * (1f + 0.1f * zones[zi].raisedFrac);
                         coolCapKW += d.coolingKW * heatMul;
                         break;
                 }
@@ -305,7 +350,7 @@ namespace DCT
             ComputeSolar();
             outageActive = EventActive("outage");
             outageLong = outageActive && EventMag("outage", 0) > 0.5f;
-            availableKW = outageActive ? (outageLong ? Mathf.Min(upsKW, genKW) : upsKW) : supplyKW;
+            availableKW = outageActive ? (outageLong ? Mathf.Min(upsKW, genKW) : upsKW) + batteryKW : supplyKW;
             ispGbps = ispNominal * EventMag("fibercut", 1f);
 
             coreUsage.Clear();
@@ -364,6 +409,8 @@ namespace DCT
                 int swTotal = o.devices.Count(x => Catalog.Device(x.def)?.kind == DeviceKind.Switch);
                 info.degraded = (o.pduTripped && o.dualPdu) || (hasSecond && (ok1 != ok2)) || (swTotal >= 2 && info.switches == 1);
                 info.airflow = AirflowFactor(o, out info.airflowNote);
+                info.looseCabling = (o.linkCore > 0 && !TrayRouted(o, o.linkCore)) || (o.linkCore2 > 0 && !TrayRouted(o, o.linkCore2));
+                if (info.looseCabling) { info.airflow *= 1.08f; info.airflowNote += " - loose cabling blocks airflow (+8%)"; }
                 if (info.drawing) rackLoad += info.loadKW;
             }
 
@@ -411,115 +458,45 @@ namespace DCT
                 }
             }
 
-            // ---- Network demand ----
-            bwDemand = 0;
-            foreach (var c in S.contracts) if (c.status == ContractStatus.Active) bwDemand += c.reqBandwidth;
-            bwDemand *= EventMag("surge", 1f);
-            netQuality = bwDemand <= 0.001f ? 1f : Mathf.Min(1f, ispGbps / bwDemand);
-
-            // ---- Contract provisioning ----
-            provision.Clear();
-            var byContract = new Dictionary<int, List<PlacedObject>>();
-            foreach (var o in rackList)
-                if (o.contractId > 0)
-                {
-                    if (!byContract.TryGetValue(o.contractId, out var l)) byContract[o.contractId] = l = new List<PlacedObject>();
-                    l.Add(o);
-                }
-            var none = new List<PlacedObject>();
-            foreach (var c in S.contracts)
-            {
-                if (c.status != ContractStatus.Setup && c.status != ContractStatus.Active) continue;
-                provision[c.id] = Evaluate(c, byContract.TryGetValue(c.id, out var lst) ? lst : none);
-            }
-        }
-
-        Provision Evaluate(Contract c, List<PlacedObject> rackList)
-        {
-            var p = new Provision();
-            string rackIssue = null;
-            int assigned = 0, nonRedundant = 0;
-            foreach (var o in rackList)
-            {
-                if (o.contractId != c.id) continue;
-                assigned++;
-                var info = racks[o.id];
-                if (!info.online) { rackIssue ??= info.issue; continue; }
-                if (c.redundant && !info.redundant) nonRedundant++;
-                p.racks++;
-                p.bandwidth += info.linkGbps;
-                p.cores += info.cores; p.storage += info.storage; p.gpus += info.gpus;
-                if (c.type == ContractType.Dedicated)
-                {
-                    int portsLeft = info.ports;
-                    foreach (var dev in o.devices)
-                    {
-                        if (dev.failed) continue;
-                        var dd = Catalog.Device(dev.def);
-                        if (dd == null || dd.kind != DeviceKind.Server) continue;
-                        if (portsLeft-- <= 0) break;
-                        if (dd.cores >= c.reqCoresPerServer) p.qualServers++;
-                    }
-                }
-            }
-            p.bandwidth *= netQuality;
-
-            float main = 1f;
-            switch (c.type)
-            {
-                case ContractType.Colocation: main = c.reqRacks > 0 ? (float)p.racks / c.reqRacks : 1f; break;
-                case ContractType.Dedicated: main = c.reqServers > 0 ? (float)p.qualServers / c.reqServers : 1f; break;
-                case ContractType.Compute: main = c.reqCores > 0 ? (float)p.cores / c.reqCores : 1f; break;
-                case ContractType.Storage: main = c.reqStorageTB > 0 ? p.storage / c.reqStorageTB : 1f; break;
-                case ContractType.GpuCloud: main = c.reqGpus > 0 ? (float)p.gpus / c.reqGpus : 1f; break;
-            }
-            float bwFrac = c.reqBandwidth > 0 ? p.bandwidth / c.reqBandwidth : 1f;
-            p.service = Mathf.Clamp01(Mathf.Min(main, bwFrac));
-            string need = null;
-            switch (c.type)
-            {
-                case ContractType.Colocation: if (p.racks < c.reqRacks) need = $"Needs {c.reqRacks} online racks (has {p.racks})"; break;
-                case ContractType.Dedicated: if (p.qualServers < c.reqServers) need = $"Needs {c.reqServers} servers with {c.reqCoresPerServer}+ cores (has {p.qualServers})"; break;
-                case ContractType.Compute: if (p.cores < c.reqCores) need = $"Needs {c.reqCores} cores (has {p.cores})"; break;
-                case ContractType.Storage: if (p.storage < c.reqStorageTB - 0.01f) need = $"Needs {c.reqStorageTB:0} TB (has {p.storage:0})"; break;
-                case ContractType.GpuCloud: if (p.gpus < c.reqGpus) need = $"Needs {c.reqGpus} GPUs (has {p.gpus})"; break;
-            }
-            if (need == null && p.bandwidth + 0.001f < c.reqBandwidth)
-                need = netQuality < 1f ? $"ISP saturated: {p.bandwidth:0.0}/{c.reqBandwidth:0.0} Gbps" : $"Needs {c.reqBandwidth:0.0} Gbps uplink (has {p.bandwidth:0.0})";
-            if (need == null && c.redundant && nonRedundant > 0)
-            {
-                need = $"Redundancy required: {nonRedundant} rack(s) lack dual PDU / 2 ToR / 2 core uplinks";
-                p.service = Mathf.Min(p.service, 0.97f);
-            }
-            if (need != null && assigned == 0) need = "No racks assigned";
-            else if (need != null && rackIssue != null) need += $" - rack issue: {rackIssue}";
-            p.meets = need == null;
-            p.issue = need;
-            return p;
+            company.RecomputeProvision();
         }
 
         // =====================================================================
         //  Time
         // =====================================================================
-        public void TickHour()
-        {
-            if (S.gameOver) return;
-            S.hour++;
-            S.events.RemoveAll(e =>
-            {
-                if (S.hour < e.endHour) return false;
-                Log($"{e.label} has ended.", 1);
-                OnEventEnded(e);
-                return true;
-            });
+        /// <summary>Advances the whole company (every site) by one hour.</summary>
+        public void TickHour() => company.TickHour();
 
-            UpdateTemperatures();
-            Recompute();
-            RollFailures();
-            StaffTick();
+        /// <summary>Per-site hour: events, thermals, power, failures, staff, energy and site costs. Site must be bound.</summary>
+        internal void TickSite()
+        {
+            inSiteTick = true;
+            try
+            {
+                S.events.RemoveAll(e =>
+                {
+                    if (S.hour < e.endHour) return false;
+                    if (!e.global || siteIndex == 0) Log($"{e.label} has ended.", 1);
+                    OnEventEnded(e);
+                    return true;
+                });
+                UpdateTemperatures();
+                Recompute();
+                RollFailures();
+                StaffTick();
+                HourSite();
+                FinancesSite();
+                if (S.hour % Catalog.HoursPerDay == 0) DailyWeather();
+            }
+            finally { inSiteTick = false; }
+        }
+
+        /// <summary>Company hour: contracts, tickets, income, offers, events, progression. Runs once on the active site.</summary>
+        internal void TickCompany()
+        {
             UpdateContracts();
-            HourExtras();
-            UpdateFinances();
+            TicketsHour();
+            FinancesCompany();
             if (S.hour % Catalog.HoursPerDay == 0) DailyTick();
             CheckLevel();
         }
@@ -695,10 +672,7 @@ namespace DCT
             S.offers.RemoveAll(o => S.hour >= o.expiresHour);
         }
 
-        void MarkContractRacks(Contract c)
-        {
-            foreach (var o in Racks) if (o.contractId == c.id) MarkDirty(o);
-        }
+        void MarkContractRacks(Contract c) => company.MarkContractRacks(c.id);
 
         public float Uptime(Contract c, bool month)
         {
@@ -745,7 +719,7 @@ namespace DCT
                 S.xp += MonthXp(c) * 3;
                 S.rating = Mathf.Min(100, S.rating + 3f);
                 S.contractsCompleted++;
-                var rackIds = Racks.Where(r => r.contractId == c.id).Select(r => r.id).ToList();
+                var rackIds = company.AllRacks().Where(x => x.rack.contractId == c.id).Select(x => x.rack.id).ToList();
                 EndContract(c, ContractStatus.Completed);
                 Log($"Contract with {c.customer} completed successfully! (+reputation)", 1);
                 float overall = Uptime(c, false);
@@ -766,9 +740,9 @@ namespace DCT
                         c.isRenewal = true;
                         if (!c.traits.Contains("Renewal")) c.traits.Add("Renewal");
                         foreach (var id in rackIds)
-                            if (objById.TryGetValue(id, out var r) && r.contractId < 0) { r.contractId = c.id; MarkDirty(r); }
+                            if (company.FindObject(id, out var rs, out var r) && r.contractId < 0) { r.contractId = c.id; rs.MarkDirty(r); }
                         Log($"Renewed {c.customer} for {extra} months.", 1);
-                        Recompute();
+                        company.RecomputeProvision();
                     }).Add("Decline", null));
                 }
             }
@@ -779,14 +753,13 @@ namespace DCT
         void EndContract(Contract c, ContractStatus status)
         {
             c.status = status;
-            foreach (var o in Racks)
-                if (o.contractId == c.id) { o.contractId = -1; MarkDirty(o); }
+            company.ReleaseContractRacks(c.id);
             Recompute();
         }
 
-        void UpdateFinances()
+        void FinancesSite()
         {
-            float grid = Mathf.Max(0, loadKW - solarKW);
+            float grid = gridKW;
             float powerCost = grid * (PowerPriceNow + S.city.carbonTax);
             float netCost = 0;
             foreach (var o in ObjectsOfKind(FacilityKind.Isp)) netCost += Catalog.Facility(o.def).monthly / Catalog.HoursPerMonth;
@@ -795,7 +768,12 @@ namespace DCT
             S.current.power += powerCost;
             S.current.network += netCost;
             S.current.salaries += salaries;
-            hourlyCost = powerCost + netCost + salaries;
+            siteHourlyCost = powerCost + netCost + salaries;
+        }
+
+        void FinancesCompany()
+        {
+            hourlyCost = company.sims.Sum(x => x.siteHourlyCost);
             hourlyIncome = S.contracts.Where(c => c.status == ContractStatus.Active).Sum(c => c.monthlyPay) / Catalog.HoursPerMonth;
 
             if (S.money < 0)
@@ -867,9 +845,10 @@ namespace DCT
                     new KeyValuePair<string, float>("regulation", 0.2f),
                     new KeyValuePair<string, float>("pricewar", 0.4f),
                     new KeyValuePair<string, float>("breakin", Racks.Any(r => r.devices.Count > 0) ? 0.35f : 0f),
+                    new KeyValuePair<string, float>("flood", S.city.climate == "Desert" ? 0f : (S.weather == "Rain" || S.weather == "Storm") ? 1.0f : 0.15f),
                 };
                 string pick = WeightedPick(opts);
-                if (pick != null && !EventActive(pick)) TriggerEvent(pick);
+                if (pick != null) TriggerOnSite(pick);
             }
             if (rng.NextDouble() < 0.05f)
             {
@@ -1101,6 +1080,29 @@ namespace DCT
                 if (apply) foreach (var o in objs.ToList()) RemoveObject(o);
                 return objs.Count;
             }
+            int trayN = 0, raisedN = 0;
+            for (int y = r.yMin; y < r.yMax; y++)
+                for (int x = r.xMin; x < r.xMax; x++)
+                {
+                    if (S.HasFlag(x, y, GameState.FlagTray)) trayN++;
+                    if (S.HasFlag(x, y, GameState.FlagRaised)) raisedN++;
+                }
+            if (trayN > 0 || raisedN > 0)
+            {
+                int flag = trayN > 0 ? GameState.FlagTray : GameState.FlagRaised;
+                int n = trayN > 0 ? trayN : raisedN;
+                cost = -n * (trayN > 0 ? TrayCost : RaisedCost) * 0.5f;
+                what = trayN > 0 ? $"Remove {n} cable tray tile(s)" : $"Remove {n} raised floor tile(s)";
+                if (apply)
+                {
+                    for (int y = r.yMin; y < r.yMax; y++)
+                        for (int x = r.xMin; x < r.xMax; x++)
+                            if (S.InBounds(x, y)) S.flags[y * S.mapW + x] &= ~flag;
+                    Refund(-cost);
+                    TilesChanged();
+                }
+                return n;
+            }
             if (rooms > 0)
             {
                 what = $"Revert {rooms} tile(s) to corridor";
@@ -1277,10 +1279,20 @@ namespace DCT
             Recompute();
         }
 
+        public const int MaxLooseCable = 14;
+
         public float CableCost(PlacedObject rack, PlacedObject core)
         {
             int dist = Mathf.Abs(rack.x - core.x) + Mathf.Abs(rack.y - core.y);
-            return Catalog.CableBaseCost + dist * Catalog.CablePerTile;
+            return Catalog.CableBaseCost + dist * Catalog.CablePerTile * (TrayRouted(rack, core.id) ? 0.5f : 1f);
+        }
+
+        public string CableError(PlacedObject rack, PlacedObject core)
+        {
+            int dist = Mathf.Abs(rack.x - core.x) + Mathf.Abs(rack.y - core.y);
+            if (dist > MaxLooseCable && !TrayRouted(rack, core.id))
+                return $"{dist} tiles is too far for loose cabling (max {MaxLooseCable}). Build cable trays linking the rack to the network room.";
+            return null;
         }
 
         public int FreePorts(PlacedObject core)
@@ -1293,6 +1305,8 @@ namespace DCT
         {
             if (rack.linkCore == core.id) return "Already connected";
             if (FreePorts(core) <= 0) return "Core switch has no free ports";
+            var ce = CableError(rack, core);
+            if (ce != null) return ce;
             Checkpoint();
             float cost = CableCost(rack, core);
             if (!Spend(cost)) return "Not enough money";
@@ -1308,7 +1322,7 @@ namespace DCT
             PlacedObject best = null; float bestScore = float.MaxValue;
             foreach (var c in ObjectsOfKind(FacilityKind.CoreSwitch))
             {
-                if (c.failed || FreePorts(c) <= 0 || S.Room(c.x, c.y) != RoomType.Network) continue;
+                if (c.failed || FreePorts(c) <= 0 || S.Room(c.x, c.y) != RoomType.Network || CableError(rack, c) != null) continue;
                 float score = CableCost(rack, c) - Catalog.Facility(c.def).portGbps * 50f;
                 if (score < bestScore) { bestScore = score; best = c; }
             }
@@ -1318,7 +1332,7 @@ namespace DCT
         public string AutoConnect(PlacedObject rack)
         {
             var c = BestCore(rack);
-            if (c == null) return "No core switch with free ports in a Network Room";
+            if (c == null) return "No reachable core switch with free ports in a Network Room (long runs need cable trays)";
             return Connect(rack, c);
         }
 

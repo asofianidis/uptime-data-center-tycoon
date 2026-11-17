@@ -353,6 +353,7 @@
             "rackKW": 8.0,
             "staff": 0,
             "model": "",
+            "capacityKWh": 0.0,
             "level": 1,
             "research": 0.0,
             "color": {
@@ -383,6 +384,7 @@
             "rackKW": 20.0,
             "staff": 0,
             "model": "",
+            "capacityKWh": 0.0,
             "level": 4,
             "research": 40000.0,
             "color": {
@@ -413,6 +415,7 @@
             "rackKW": 60.0,
             "staff": 0,
             "model": "",
+            "capacityKWh": 0.0,
             "level": 7,
             "research": 200000.0,
             "color": {
@@ -443,6 +446,7 @@
             "rackKW": 0.0,
             "staff": 0,
             "model": "crac",
+            "capacityKWh": 0.0,
             "level": 1,
             "research": 0.0,
             "color": {
@@ -473,6 +477,7 @@
             "rackKW": 0.0,
             "staff": 0,
             "model": "inrow",
+            "capacityKWh": 0.0,
             "level": 3,
             "research": 25000.0,
             "color": {
@@ -503,6 +508,7 @@
             "rackKW": 0.0,
             "staff": 0,
             "model": "",
+            "capacityKWh": 0.0,
             "level": 6,
             "research": 180000.0,
             "color": {
@@ -533,6 +539,7 @@
             "rackKW": 0.0,
             "staff": 0,
             "model": "core",
+            "capacityKWh": 0.0,
             "level": 1,
             "research": 0.0,
             "color": {
@@ -563,6 +570,7 @@
             "rackKW": 0.0,
             "staff": 0,
             "model": "core",
+            "capacityKWh": 0.0,
             "level": 3,
             "research": 35000.0,
             "color": {
@@ -593,6 +601,7 @@
             "rackKW": 0.0,
             "staff": 0,
             "model": "core",
+            "capacityKWh": 0.0,
             "level": 5,
             "research": 110000.0,
             "color": {
@@ -623,6 +632,7 @@
             "rackKW": 0.0,
             "staff": 0,
             "model": "core",
+            "capacityKWh": 0.0,
             "level": 8,
             "research": 450000.0,
             "color": {
@@ -653,6 +663,7 @@
             "rackKW": 0.0,
             "staff": 0,
             "model": "isp",
+            "capacityKWh": 0.0,
             "level": 1,
             "research": 0.0,
             "color": {
@@ -683,6 +694,7 @@
             "rackKW": 0.0,
             "staff": 0,
             "model": "isp",
+            "capacityKWh": 0.0,
             "level": 4,
             "research": 50000.0,
             "color": {
@@ -713,6 +725,7 @@
             "rackKW": 0.0,
             "staff": 0,
             "model": "isp",
+            "capacityKWh": 0.0,
             "level": 7,
             "research": 250000.0,
             "color": {
@@ -743,6 +756,7 @@
             "rackKW": 0.0,
             "staff": 0,
             "model": "xfmr",
+            "capacityKWh": 0.0,
             "level": 1,
             "research": 0.0,
             "color": {
@@ -773,6 +787,7 @@
             "rackKW": 0.0,
             "staff": 0,
             "model": "",
+            "capacityKWh": 0.0,
             "level": 5,
             "research": 90000.0,
             "color": {
@@ -803,6 +818,7 @@
             "rackKW": 0.0,
             "staff": 0,
             "model": "swgear",
+            "capacityKWh": 0.0,
             "level": 1,
             "research": 0.0,
             "color": {
@@ -833,6 +849,7 @@
             "rackKW": 0.0,
             "staff": 0,
             "model": "",
+            "capacityKWh": 0.0,
             "level": 5,
             "research": 80000.0,
             "color": {
@@ -863,6 +880,7 @@
             "rackKW": 0.0,
             "staff": 0,
             "model": "ups",
+            "capacityKWh": 0.0,
             "level": 1,
             "research": 0.0,
             "color": {
@@ -893,6 +911,7 @@
             "rackKW": 0.0,
             "staff": 0,
             "model": "ups",
+            "capacityKWh": 0.0,
             "level": 4,
             "research": 60000.0,
             "color": {
@@ -923,6 +942,7 @@
             "rackKW": 0.0,
             "staff": 0,
             "model": "gen",
+            "capacityKWh": 0.0,
             "level": 2,
             "research": 10000.0,
             "color": {
@@ -953,6 +973,7 @@
             "rackKW": 0.0,
             "staff": 0,
             "model": "",
+            "capacityKWh": 0.0,
             "level": 6,
             "research": 150000.0,
             "color": {
@@ -983,6 +1004,7 @@
             "rackKW": 0.0,
             "staff": 0,
             "model": "solar",
+            "capacityKWh": 0.0,
             "level": 3,
             "research": 25000.0,
             "color": {
@@ -1013,6 +1035,7 @@
             "rackKW": 0.0,
             "staff": 0,
             "model": "",
+            "capacityKWh": 0.0,
             "level": 6,
             "research": 90000.0,
             "color": {
@@ -1043,12 +1066,44 @@
             "rackKW": 0.0,
             "staff": 0,
             "model": "suppress",
+            "capacityKWh": 0.0,
             "level": 2,
             "research": 8000.0,
             "color": {
                 "r": 0.8500000238418579,
                 "g": 0.15000000596046448,
                 "b": 0.11999999731779099,
+                "a": 1.0
+            }
+        },
+        {
+            "id": "bess",
+            "name": "Battery Storage (BESS)",
+            "desc": "400 kWh lithium battery. Charges when power is cheap (night), discharges at the evening peak, and backs up the grid during outages.",
+            "kind": 11,
+            "room": 4,
+            "w": 2,
+            "h": 1,
+            "cost": 90000.0,
+            "watts": 0.0,
+            "coolingKW": 0.0,
+            "supplyKW": 100.0,
+            "backupKW": 0.0,
+            "bandwidth": 0.0,
+            "monthly": 0.0,
+            "ports": 0,
+            "portGbps": 0.0,
+            "rackU": 0,
+            "rackKW": 0.0,
+            "staff": 0,
+            "model": "",
+            "capacityKWh": 400.0,
+            "level": 4,
+            "research": 60000.0,
+            "color": {
+                "r": 0.20000000298023224,
+                "g": 0.44999998807907104,
+                "b": 0.3499999940395355,
                 "a": 1.0
             }
         },
@@ -1073,6 +1128,7 @@
             "rackKW": 0.0,
             "staff": 1,
             "model": "desk",
+            "capacityKWh": 0.0,
             "level": 1,
             "research": 0.0,
             "color": {

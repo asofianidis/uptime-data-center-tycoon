@@ -24,6 +24,7 @@ namespace DCT
                 case FacilityKind.Desk: return Desk(mb, d);
                 case FacilityKind.Solar: return Solar(mb, d);
                 case FacilityKind.Suppression: return Suppression(mb, d);
+                case FacilityKind.Battery: return Battery(mb, d);
             }
             mb.Box(new Vector3(0, 0.5f, 0), new Vector3(0.8f, 1f, 0.8f), d.color);
             return 1f;
@@ -270,6 +271,21 @@ namespace DCT
             mb.Box(new Vector3(0, 0.9f, -0.15f), new Vector3(0.3f, 0.35f, 0.05f), new Color(0.85f, 0.85f, 0.85f));
             mb.Box(new Vector3(0, 1.0f, -0.18f), new Vector3(0.06f, 0.06f, 0.01f), MeshBuilder.Led(new Color(0.2f, 1f, 0.3f)));
             return 1.65f;
+        }
+
+        static float Battery(MeshBuilder mb, FacilityDef d)
+        {
+            float L = d.w * 0.92f;
+            mb.Box(new Vector3(0, 0.05f, 0), new Vector3(L, 0.1f, 0.85f), new Color(0.2f, 0.2f, 0.22f));
+            mb.Box(new Vector3(0, 0.85f, 0), new Vector3(L - 0.05f, 1.5f, 0.8f), new Color(0.88f, 0.9f, 0.9f));
+            for (int i = 0; i < 6; i++)
+            {
+                float x = -L * 0.42f + i * L * 0.168f;
+                mb.Box(new Vector3(x, 0.85f, -0.41f), new Vector3(L * 0.14f, 1.35f, 0.02f), d.color);
+                mb.Box(new Vector3(x, 1.4f, -0.425f), new Vector3(0.05f, 0.05f, 0.01f), MeshBuilder.Led(new Color(0.2f, 1f, 0.4f)));
+            }
+            mb.Box(new Vector3(L * 0.3f, 1.62f, 0), new Vector3(0.3f, 0.06f, 0.3f), new Color(0.3f, 0.3f, 0.32f));
+            return 1.7f;
         }
 
         public static void Person(MeshBuilder mb, Color shirt)

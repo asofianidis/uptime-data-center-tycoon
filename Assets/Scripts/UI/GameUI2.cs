@@ -39,7 +39,7 @@ namespace DCT
             GUILayout.Label("BUILD", lblDim);
             if (TB("Select  [Esc]", gm.tool == Tool.Select)) { gm.SetTool(Tool.Select); buildMenuOpen = roomMenuOpen = false; }
             if (TB($"Foundation  [{Settings.KeyName("Foundation")}]", gm.tool == Tool.Foundation, "Foundation")) { gm.SetTool(Tool.Foundation); buildMenuOpen = roomMenuOpen = false; }
-            if (TB("Rooms", gm.tool == Tool.Room || roomMenuOpen, "Rooms")) { roomMenuOpen = !roomMenuOpen; buildMenuOpen = false; if (roomMenuOpen) { gm.SetTool(Tool.Room); window = Window.None; } }
+            if (TB("Rooms & Infra", gm.tool == Tool.Room || gm.tool == Tool.Tray || gm.tool == Tool.Raised || roomMenuOpen, "Rooms")) { roomMenuOpen = !roomMenuOpen; buildMenuOpen = false; if (roomMenuOpen) { gm.SetTool(Tool.Room); window = Window.None; } }
             if (TB($"Equipment  [{Settings.KeyName("Equipment")}]", buildMenuOpen || gm.tool == Tool.Place, "Equipment")) ToggleBuildMenu();
             if (TB($"Demolish  [{Settings.KeyName("Demolish")}]", gm.tool == Tool.Demolish)) { gm.SetTool(Tool.Demolish); buildMenuOpen = roomMenuOpen = false; }
             bool prev = GUI.enabled;
@@ -174,6 +174,9 @@ namespace DCT
                     GUILayout.Label($"Peak output: {d.supplyKW:0} kW   Now: {(Sim.solarCapKW > 0 ? Sim.solarKW * d.supplyKW / Sim.solarCapKW : 0):0.0} kW", lbl);
                     GUILayout.Label($"Weather: {S.weather}   Sun factor x{S.city.solarFactor:0.00}   Last month solar share: {S.lastSolarShare * 100:0}%", lblDim);
                     break;
+                case FacilityKind.Battery:
+                    BatteryInfo(o, d);
+                    break;
                 case FacilityKind.Suppression:
                 {
                     int zi = Sim.ZoneAt(o);
@@ -254,9 +257,10 @@ namespace DCT
                     GUILayout.BeginHorizontal(panelDark);
                     Swatch(WorldView.RoleColor(m.role), 12);
                     GUILayout.Label($"{m.name}", lblBold, GUILayout.Width(150));
-                    GUILayout.Label($"{Simulation.RoleName(m.role)}  skill {new string('*', m.skill)}", lblSmall, GUILayout.Width(190));
-                    string state = i >= Sim.deskCount ? "No desk!" : m.role == "Security" ? "On patrol" : m.state == "idle" ? "Idle at desk" : m.state == "walking" ? $"Walking to #{m.taskObj}" : m.state == "working" ? (m.taskTicket >= 0 ? $"Handling ticket at #{m.taskObj}" : $"Repairing #{m.taskObj}") : "Returning";
-                    GUILayout.Label(state, i >= Sim.deskCount ? lblWarn : lblSmall, GUILayout.Width(170));
+                    GUILayout.Label($"{Simulation.RoleName(m.role)}  {new string('*', m.skill)}", lblSmall, GUILayout.Width(150));
+                    StaffShiftCells(m);
+                    string state = StaffState(m);
+                    GUILayout.Label(state, !Sim.HasDesk(m) ? lblWarn : lblSmall, GUILayout.Width(150));
                     GUILayout.Label($"{Money(m.salary)}/mo", lblSmall);
                     GUILayout.FlexibleSpace();
                     var mm = m;
@@ -277,11 +281,10 @@ namespace DCT
                     GUILayout.Label($"{Simulation.RoleName(c.role)}  skill {new string('*', c.skill)}", lblSmall, GUILayout.Width(190));
                     GUILayout.Label($"{Money(c.salary)}/mo", lblSmall, GUILayout.Width(90));
                     GUILayout.FlexibleSpace();
-                    float fee = Sim.HireFee(c);
-                    if (SmallButton($"Hire (fee {Money(fee)})", S.staff.Count < Sim.deskCount && S.money >= fee)) { var e = Sim.HireCandidate(c); if (e != null) Toast(e, 2); }
+                    HireButtons(c);
                     GUILayout.EndHorizontal();
                 }
-                if (S.staff.Count >= Sim.deskCount) GUILayout.Label("All desks are taken - place more Technician Desks in an Office.", lblWarn);
+                GUILayout.Label($"Day shift (07-19): {Sim.ShiftCount("Day")}/{Sim.deskCount} desks.  Night shift (19-07): {Sim.ShiftCount("Night")}/{Sim.deskCount} desks. Desks are shared between shifts. Tired staff (fatigue > 60) work slower.", lblDim);
             }
             else
             {
@@ -468,9 +471,10 @@ namespace DCT
             for (int slot = 1; slot <= 3; slot++)
             {
                 GUILayout.BeginHorizontal(panelDark);
-                GUILayout.Label($"Slot {slot}", lblBold, GUILayout.Width(60));
+                GUILayout.Label($"Slot {slot}", lblBold, GUILayout.Width(50));
+                Thumb(slot);
                 string meta = GameManager.SlotMeta(slot);
-                GUILayout.Label(string.IsNullOrEmpty(meta) ? "(empty)" : meta, lblSmall, GUILayout.Width(330));
+                GUILayout.Label(string.IsNullOrEmpty(meta) ? "(empty)" : meta, new GUIStyle(lblSmall) { wordWrap = true }, GUILayout.Width(240));
                 GUILayout.FlexibleSpace();
                 int s = slot;
                 if (allowSave && SmallButton("Save")) { if (GameManager.HasSave(s)) Confirm($"Overwrite slot {s}?", () => gm.Save(s)); else gm.Save(s); }
@@ -478,9 +482,10 @@ namespace DCT
                 GUILayout.EndHorizontal();
             }
             GUILayout.BeginHorizontal(panelDark);
-            GUILayout.Label("Auto", lblBold, GUILayout.Width(60));
+            GUILayout.Label("Auto", lblBold, GUILayout.Width(50));
+            Thumb(0);
             string am = GameManager.SlotMeta(0);
-            GUILayout.Label(string.IsNullOrEmpty(am) ? "(no autosave yet - saved every month)" : am, lblSmall, GUILayout.Width(330));
+            GUILayout.Label(string.IsNullOrEmpty(am) ? "(no autosave yet - saved every month)" : am, new GUIStyle(lblSmall) { wordWrap = true }, GUILayout.Width(240));
             GUILayout.FlexibleSpace();
             if (SmallButton("Load", GameManager.HasSave(0))) { gm.Load(0); window = Window.None; }
             GUILayout.EndHorizontal();
@@ -508,7 +513,7 @@ namespace DCT
             switch (window)
             {
                 case Window.Settings: DrawModalPanel("Settings", SettingsWindowBody, 620, 640); return true;
-                case Window.SaveLoad: DrawModalPanel(gm.inGame ? "Save / Load" : "Load Game", () => SaveLoadBody(gm.inGame), 620, 300); return true;
+                case Window.SaveLoad: DrawModalPanel(gm.inGame ? "Save / Load" : "Load Game", () => SaveLoadBody(gm.inGame), 640, 420); return true;
                 case Window.Achievements: DrawModalPanel("Achievements (all games)", AchievementsBody, 620, 600); return true;
             }
             return false;

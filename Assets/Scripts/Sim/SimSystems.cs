@@ -12,9 +12,9 @@ namespace DCT
     public partial class Simulation
     {
         // ================================================================ undo hook
-        public event Action BeforeChange;
+        public event Action BeforeChange { add => company.BeforeChange += value; remove => company.BeforeChange -= value; }
         public bool suppressCheckpoints;
-        void Checkpoint() { if (!suppressCheckpoints) BeforeChange?.Invoke(); }
+        void Checkpoint() { if (!suppressCheckpoints) company.RaiseBeforeChange(); }
 
         // ================================================================ airflow (hot/cold aisles)
         public static Vector2Int FrontDir(int rot)
@@ -188,6 +188,161 @@ namespace DCT
             solarKW = solarCapKW * SunCurve(S.hour % 24) * WeatherSolar * S.city.solarFactor;
         }
 
+        // ================================================================ battery storage
+        public float batteryKW, batteryCapKWh, batteryChargeKWh, batteryChargeKW, batteryDischargeKW;
+
+        void BatteryHour()
+        {
+            batteryChargeKW = batteryDischargeKW = 0;
+            float need = Mathf.Max(0, loadKW - solarKW);
+            foreach (var o in S.objects)
+            {
+                var d = Catalog.Facility(o.def);
+                if (d == null || d.kind != FacilityKind.Battery || o.failed) continue;
+                if (outageActive)
+                {
+                    float use = Mathf.Min(d.supplyKW, o.charge);
+                    o.charge -= use;
+                }
+                else if (TimeOfDayPriceMul < 1f)
+                {
+                    float c = Mathf.Min(d.supplyKW, d.capacityKWh - o.charge);
+                    if (c > 0) { o.charge += c * 0.92f; batteryChargeKW += c; }
+                }
+                else if (TimeOfDayPriceMul > 1f)
+                {
+                    float dis = Mathf.Min(d.supplyKW, o.charge, Mathf.Max(0, need - batteryDischargeKW));
+                    if (dis > 0) { o.charge -= dis; batteryDischargeKW += dis; }
+                }
+                o.charge = Mathf.Clamp(o.charge, 0, d.capacityKWh);
+            }
+        }
+
+        // ================================================================ cable trays & raised floors
+        public const float TrayCost = 40f, RaisedCost = 70f;
+        int[] trayComp;
+
+        void RebuildTrayComponents()
+        {
+            trayComp = new int[S.mapW * S.mapH];
+            if (S.flags == null) return;
+            int next = 1;
+            var stack = new Stack<int>();
+            for (int i = 0; i < trayComp.Length; i++)
+            {
+                if (trayComp[i] != 0 || (S.flags[i] & GameState.FlagTray) == 0) continue;
+                trayComp[i] = next;
+                stack.Push(i);
+                while (stack.Count > 0)
+                {
+                    int t = stack.Pop();
+                    int x = t % S.mapW, y = t / S.mapW;
+                    for (int k = 0; k < 4; k++)
+                    {
+                        int nx = x + (k == 0 ? 1 : k == 1 ? -1 : 0), ny = y + (k == 2 ? 1 : k == 3 ? -1 : 0);
+                        if (!S.InBounds(nx, ny)) continue;
+                        int n = ny * S.mapW + nx;
+                        if (trayComp[n] != 0 || (S.flags[n] & GameState.FlagTray) == 0) continue;
+                        trayComp[n] = next;
+                        stack.Push(n);
+                    }
+                }
+                next++;
+            }
+        }
+
+        HashSet<int> TrayCompsNear(PlacedObject o)
+        {
+            var set = new HashSet<int>();
+            if (trayComp == null) return set;
+            var d = Catalog.Facility(o.def);
+            Footprint(d, o.rot, out int w, out int h);
+            for (int y = o.y - 1; y <= o.y + h; y++)
+                for (int x = o.x - 1; x <= o.x + w; x++)
+                    if (S.InBounds(x, y) && trayComp[y * S.mapW + x] != 0) set.Add(trayComp[y * S.mapW + x]);
+            return set;
+        }
+
+        /// <summary>True when a continuous run of cable tray connects the rack to the core switch.</summary>
+        public bool TrayRouted(PlacedObject rack, int coreId)
+        {
+            if (!objById.TryGetValue(coreId, out var core)) return false;
+            var a = TrayCompsNear(rack);
+            if (a.Count == 0) return false;
+            return TrayCompsNear(core).Overlaps(a);
+        }
+
+        /// <summary>Tile path along trays from near the rack to near the core (for drawing cables).</summary>
+        public List<Vector2Int> TrayPath(PlacedObject rack, PlacedObject core)
+        {
+            if (trayComp == null) return null;
+            var shared = TrayCompsNear(rack);
+            shared.IntersectWith(TrayCompsNear(core));
+            if (shared.Count == 0) return null;
+            int comp = shared.First();
+            List<int> Near(PlacedObject o)
+            {
+                var d = Catalog.Facility(o.def);
+                Footprint(d, o.rot, out int w, out int h);
+                var l = new List<int>();
+                for (int y = o.y - 1; y <= o.y + h; y++)
+                    for (int x = o.x - 1; x <= o.x + w; x++)
+                        if (S.InBounds(x, y) && trayComp[y * S.mapW + x] == comp) l.Add(y * S.mapW + x);
+                return l;
+            }
+            var starts = Near(rack); var goals = new HashSet<int>(Near(core));
+            var prev = new Dictionary<int, int>();
+            var q = new Queue<int>();
+            foreach (var st in starts) { prev[st] = -1; q.Enqueue(st); }
+            while (q.Count > 0)
+            {
+                int c = q.Dequeue();
+                if (goals.Contains(c))
+                {
+                    var path = new List<Vector2Int>();
+                    for (int p = c; p != -1; p = prev[p]) path.Add(new Vector2Int(p % S.mapW, p / S.mapW));
+                    path.Reverse();
+                    return path;
+                }
+                int cx = c % S.mapW, cy = c / S.mapW;
+                for (int k = 0; k < 4; k++)
+                {
+                    int nx = cx + (k == 0 ? 1 : k == 1 ? -1 : 0), ny = cy + (k == 2 ? 1 : k == 3 ? -1 : 0);
+                    if (!S.InBounds(nx, ny)) continue;
+                    int n = ny * S.mapW + nx;
+                    if (prev.ContainsKey(n) || trayComp[n] != comp) continue;
+                    prev[n] = c;
+                    q.Enqueue(n);
+                }
+            }
+            return null;
+        }
+
+        /// <summary>Paints cable trays (any building tile) or raised floor (server halls only).</summary>
+        public int PaintFlag(RectInt r, int flag, bool apply, out float cost)
+        {
+            var tiles = new List<int>();
+            for (int y = r.yMin; y < r.yMax; y++)
+                for (int x = r.xMin; x < r.xMax; x++)
+                {
+                    if (!S.InBounds(x, y) || S.HasFlag(x, y, flag)) continue;
+                    var room = S.Room(x, y);
+                    if (flag == GameState.FlagRaised && room != RoomType.ServerHall) continue;
+                    if (flag == GameState.FlagTray && room == RoomType.None && !S.Owned(x, y)) continue;
+                    tiles.Add(y * S.mapW + x);
+                }
+            cost = tiles.Count * (flag == GameState.FlagTray ? TrayCost : RaisedCost);
+            if (!apply || tiles.Count == 0) return tiles.Count;
+            Checkpoint();
+            if (!Spend(cost)) { Log("Not enough money.", 2); return 0; }
+            foreach (var t in tiles) S.flags[t] |= flag;
+            zonesDirty = true;
+            tilesVersion++;
+            objectsVersion++;
+            Recompute();
+            return tiles.Count;
+        }
+
         // ================================================================ hardware prices & aging
         public float DeviceCost(DeviceDef d)
         {
@@ -303,19 +458,47 @@ namespace DCT
 
         public float HireFee(Candidate c) => Mathf.Round(c.salary * 0.35f / 50f) * 50f;
 
-        public int WorkingStaffCount => Mathf.Min(S.staff.Count, deskCount);
-        public int EffectiveTechs => S.staff.Take(deskCount).Count(s => s.role != "Security");
-        public int SecurityLevel => S.staff.Take(deskCount).Where(s => s.role == "Security").Sum(s => s.skill);
-
-        public string HireCandidate(Candidate c)
+        public bool OnShift(StaffMember m)
         {
-            if (S.staff.Count >= deskCount) return "Build more desks in an Office first";
+            int h = S.hour % 24;
+            bool day = h >= 7 && h < 19;
+            return (m.shift == "Night") ? !day : day;
+        }
+
+        /// <summary>Desks are shared between shifts: each shift can seat up to the desk count.</summary>
+        public int ShiftRank(StaffMember m)
+        {
+            int rank = 0;
+            foreach (var o in S.staff) { if (o == m) break; if ((o.shift ?? "Day") == (m.shift ?? "Day")) rank++; }
+            return rank;
+        }
+
+        public bool HasDesk(StaffMember m) => ShiftRank(m) < deskCount;
+        public int ShiftCount(string shift) => S.staff.Count(m => (m.shift ?? "Day") == shift);
+        public int WorkingStaffCount => S.staff.Count(m => OnShift(m) && HasDesk(m));
+        public int EffectiveTechs => S.staff.Count(m => OnShift(m) && HasDesk(m) && m.role != "Security");
+        public int SecurityLevel => S.staff.Where(m => OnShift(m) && HasDesk(m) && m.role == "Security").Sum(m => m.skill);
+
+        public void SetShift(StaffMember m, string shift)
+        {
+            if (m.shift == shift) return;
+            m.shift = shift;
+            m.salary = Mathf.Round(m.salary * (shift == "Night" ? 1.15f : 1f / 1.15f) / 50f) * 50f;
+            Log($"{m.name} moved to the {shift.ToLower()} shift.", 0);
+        }
+
+        public string HireCandidate(Candidate c) => HireCandidate(c, ShiftCount("Night") < ShiftCount("Day") ? "Night" : "Day");
+
+        public string HireCandidate(Candidate c, string shift)
+        {
+            if (ShiftCount(shift) >= deskCount) return $"All desks are taken on the {shift.ToLower()} shift - build more desks";
             float fee = HireFee(c);
             if (!Spend(fee, false)) return "Not enough money";
-            var home = DeskPosition(S.staff.Count);
-            S.staff.Add(new StaffMember { id = S.NewId(), name = c.name, role = c.role, skill = c.skill, salary = c.salary, x = home.x, y = home.y, px = home.x, py = home.y, hiredHour = S.hour });
+            var home = DeskPosition(ShiftCount(shift));
+            float salary = shift == "Night" ? Mathf.Round(c.salary * 1.15f / 50f) * 50f : c.salary;
+            S.staff.Add(new StaffMember { id = S.NewId(), name = c.name, role = c.role, skill = c.skill, salary = salary, shift = shift, x = home.x, y = home.y, px = home.x, py = home.y, hiredHour = S.hour, state = OnShift(new StaffMember { shift = shift }) ? "idle" : "off" });
             S.candidates.Remove(c);
-            Log($"Hired {c.name} ({RoleName(c.role)}, skill {c.skill}).", 1);
+            Log($"Hired {c.name} ({RoleName(c.role)}, skill {c.skill}, {shift.ToLower()} shift).", 1);
             return null;
         }
 
@@ -324,7 +507,9 @@ namespace DCT
         {
             if (S.candidates.Count == 0) RefreshCandidates();
             var c = S.candidates.Where(x => x.role != "Security").OrderByDescending(x => x.skill).FirstOrDefault() ?? S.candidates[0];
-            return HireCandidate(c);
+            string shift = ShiftCount("Night") < ShiftCount("Day") ? "Night" : "Day";
+            if (ShiftCount(shift) >= deskCount) shift = shift == "Night" ? "Day" : "Night";
+            return HireCandidate(c, shift);
         }
 
         public void FireStaff(StaffMember m)
@@ -550,12 +735,28 @@ namespace DCT
             for (int i = 0; i < S.staff.Count; i++)
             {
                 var m = S.staff[i];
+                if (string.IsNullOrEmpty(m.shift)) m.shift = "Day";
                 m.px = m.x; m.py = m.y;
-                if (i >= deskCount || m.role == "Security")
+                int rank = ShiftRank(m);
+                bool hasDesk = rank < deskCount;
+                if (!OnShift(m) || !hasDesk)
                 {
-                    // No desk (or security): wander home / stand by.
+                    // Off shift (or no desk): go home, release any task, recover.
+                    if (m.state != "off")
+                    {
+                        foreach (var t in S.tickets) if (t.assigned == m.id) t.assigned = -1;
+                        m.taskObj = m.taskDev = m.taskTicket = -1;
+                        m.path = null;
+                        m.state = "off";
+                    }
+                    var h0 = DeskPosition(rank);
+                    m.x = m.px = h0.x; m.y = m.py = h0.y;
+                    m.fatigue = Mathf.Max(0, m.fatigue - 12f);
                     continue;
                 }
+                if (m.state == "off") m.state = "idle";
+                m.fatigue = Mathf.Clamp(m.fatigue + (m.state == "working" ? 5f : m.state == "walking" || m.state == "returning" ? 2.5f : -3f), 0, 100);
+                if (m.role == "Security") continue;
 
                 if (m.state == "walking" || m.state == "working")
                 {
@@ -587,7 +788,7 @@ namespace DCT
                     }
                     if (m.state == "returning")
                     {
-                        var home = DeskPosition(i);
+                        var home = DeskPosition(rank);
                         if (m.path == null || m.path.Count == 0)
                             m.path = FindPathToPoint(Mathf.FloorToInt(m.x), Mathf.FloorToInt(m.y), Mathf.FloorToInt(home.x), Mathf.FloorToInt(home.y)) ?? new List<int>();
                         Walk(m, WalkTilesPerHour);
@@ -605,7 +806,7 @@ namespace DCT
 
                 if (m.state == "working")
                 {
-                    float rate = 0.7f + 0.2f * m.skill;
+                    float rate = (0.7f + 0.2f * m.skill) * FatigueMul(m);
                     var job = CurrentJob(m);
                     if (job == null) { m.state = "returning"; continue; }
                     if (RoleMatches(m.role, job)) rate *= 1.5f;
@@ -614,6 +815,8 @@ namespace DCT
                 }
             }
         }
+
+        public static float FatigueMul(StaffMember m) => m.fatigue <= 60f ? 1f : Mathf.Max(0.5f, 1f - (m.fatigue - 60f) / 80f);
 
         void Walk(StaffMember m, float tiles)
         {
@@ -703,7 +906,7 @@ namespace DCT
             foreach (var c in S.contracts.Where(x => x.status == ContractStatus.Active).ToList())
             {
                 if (rng.NextDouble() > 0.14) continue;
-                var rackIds = Racks.Where(r => r.contractId == c.id).Select(r => r.id).ToList();
+                var rackIds = company.AllRacks().Where(x => x.rack.contractId == c.id).Select(x => x.rack.id).ToList();
                 if (rackIds.Count == 0) continue;
                 var t = new Ticket
                 {
@@ -726,13 +929,13 @@ namespace DCT
             foreach (var t in S.tickets.ToList())
             {
                 var c = FindContract(t.contractId);
-                if (c == null || c.status != ContractStatus.Active || !objById.ContainsKey(t.rackId)) { S.tickets.Remove(t); continue; }
+                if (c == null || c.status != ContractStatus.Active || !company.FindObject(t.rackId, out _, out _)) { S.tickets.Remove(t); continue; }
                 if (S.hour >= t.deadlineHour)
                 {
                     S.tickets.Remove(t);
                     c.satisfaction = Mathf.Max(0, c.satisfaction - 10);
                     S.ticketsMissed++;
-                    foreach (var m in S.staff) if (m.taskTicket == t.id) { m.taskTicket = -1; m.state = "returning"; }
+                    foreach (var site in S.sites) foreach (var m in site.staff) if (m.taskTicket == t.id) { m.taskTicket = -1; m.state = "returning"; }
                     Log($"Missed a support ticket for {c.customer}: {t.text}. Satisfaction dropped.", 2);
                 }
             }
@@ -944,8 +1147,8 @@ namespace DCT
                 {
                     bool gpu = rng.NextDouble() < 0.5 && S.Level >= 4;
                     int days = rng.Next(20, 41);
-                    if (gpu) { AddEvent("gpushortage", days * 24, 1.6f, "GPU shortage"); Log($"Global GPU shortage! GPU server prices +60% for {days} days.", 2); }
-                    else { AddEvent("shortage", days * 24, 1.3f, "Chip shortage"); Log($"Chip shortage! All hardware prices +30% for {days} days.", 2); }
+                    if (gpu) { AddGlobalEvent("gpushortage", days * 24, 1.6f, "GPU shortage"); Log($"Global GPU shortage! GPU server prices +60% for {days} days.", 2); }
+                    else { AddGlobalEvent("shortage", days * 24, 1.3f, "Chip shortage"); Log($"Chip shortage! All hardware prices +30% for {days} days.", 2); }
                     break;
                 }
                 case "bankrupt":
@@ -970,8 +1173,32 @@ namespace DCT
                     EnsureRivals();
                     var rv = S.rivals[rng.Next(S.rivals.Count)];
                     int days = rng.Next(20, 41);
-                    AddEvent("pricewar", days * 24, 0.85f, $"Price war ({rv.name})");
+                    AddGlobalEvent("pricewar", days * 24, 0.85f, $"Price war ({rv.name})");
                     Log($"{rv.name} slashed prices! New contract offers pay 15% less for {days} days.", 2);
+                    break;
+                }
+                case "flood":
+                {
+                    int dmg = 0, protectedRacks = 0;
+                    foreach (var o in S.objects)
+                    {
+                        var d = Catalog.Facility(o.def);
+                        bool indoors = d.room != RoomType.Outdoor;
+                        if (!indoors) continue;
+                        if (S.HasFlag(o.x, o.y, GameState.FlagRaised)) { if (d.kind == FacilityKind.Rack) protectedRacks++; continue; }
+                        if (d.kind == FacilityKind.Rack)
+                        {
+                            foreach (var dev in o.devices)
+                                if (dev.u < 3 && !dev.failed && rng.NextDouble() < 0.6) { dev.failed = true; dev.repairLeft = 4; dmg++; MarkDirty(o); }
+                        }
+                        else if ((d.kind == FacilityKind.Ups || d.kind == FacilityKind.Switchgear || d.kind == FacilityKind.Battery) && !o.failed && rng.NextDouble() < 0.25)
+                        {
+                            o.failed = true; o.repairLeft = 10; dmg++; MarkDirty(o);
+                        }
+                    }
+                    if (dmg == 0 && protectedRacks > 0) { S.floodsSurvived++; Log("Flash flood! Raised floors kept all your hardware dry.", 1); }
+                    else if (dmg > 0) Log($"Flash flood! Water reached the floor and damaged {dmg} device(s). Raised floors in server halls prevent this.", 3);
+                    else Log("Flash flood nearby - no damage this time.", 2);
                     break;
                 }
                 case "breakin":
@@ -1105,6 +1332,9 @@ namespace DCT
             new AchievementDef { id = "belt_braces", name = "Belt and Braces", desc = "Bring a fully redundant contract online." },
             new AchievementDef { id = "cool_rows", name = "Cool Rows", desc = "Have 20 racks with cold-aisle containment." },
             new AchievementDef { id = "ipo", name = "Going Public", desc = "Take your company public." },
+            new AchievementDef { id = "multinational", name = "Multinational", desc = "Operate data centers in 3 cities." },
+            new AchievementDef { id = "geo", name = "Across the Map", desc = "Bring a geo-redundant contract online." },
+            new AchievementDef { id = "flood", name = "High and Dry", desc = "Ride out a flood thanks to raised floors." },
         };
 
         public void Unlock(string id)
@@ -1120,10 +1350,11 @@ namespace DCT
 
         void CheckAchievements()
         {
-            int servers = 0;
-            foreach (var info in racks.Values) servers += info.activeServers;
+            int servers = company.sims.Sum(x => x.racks.Values.Sum(i => i.activeServers));
             if (S.contracts.Any(c => c.status == ContractStatus.Active || c.status == ContractStatus.Completed)) Unlock("first_contract");
-            if (racks.Count >= 10) Unlock("ten_racks");
+            if (company.TotalRacks >= 10) Unlock("ten_racks");
+            if (company.sims.Count >= 3) Unlock("multinational");
+            if (S.contracts.Any(c => c.geoRedundant && c.status == ContractStatus.Active && c.meeting)) Unlock("geo");
             if (servers >= 100) Unlock("hundred_servers");
             if (servers >= 1000) Unlock("thousand_servers");
             if (MonthlyRevenue >= 50000) Unlock("mrr_50k");
@@ -1140,6 +1371,7 @@ namespace DCT
             if (S.contracts.Any(c => c.redundant && c.status == ContractStatus.Active && c.meeting)) Unlock("belt_braces");
             if (Racks.Count(r => AirflowFactor(r, out _) < 1f) >= 20) Unlock("cool_rows");
             if (S.ipo) Unlock("ipo");
+            if (S.floodsSurvived > 0) Unlock("flood");
             S.peakMonthlyRevenue = Mathf.Max(S.peakMonthlyRevenue, MonthlyRevenue);
         }
 
@@ -1169,15 +1401,41 @@ namespace DCT
         // ================================================================ daily & monthly extras
         bool outageHadDowntime;
 
-        void HourExtras()
+        static readonly HashSet<string> CompanyEvents = new HashSet<string> { "shortage", "pricewar", "bankrupt", "expansion", "grant", "press" };
+
+        /// <summary>Local events hit a random site; company-wide events run here.</summary>
+        void TriggerOnSite(string type)
+        {
+            if (CompanyEvents.Contains(type) || company.sims.Count == 1)
+            {
+                if (!EventActive(type)) TriggerEvent(type);
+                return;
+            }
+            int i = rng.Next(company.sims.Count);
+            var target = company.sims[i];
+            company.WithSite(i, () =>
+            {
+                target.inSiteTick = true;
+                try { if (!target.EventActive(type)) target.TriggerEvent(type); }
+                finally { target.inSiteTick = false; }
+            });
+        }
+
+        void AddGlobalEvent(string type, int hours, float mag, string label)
+        {
+            foreach (var site in S.sites)
+                site.events.Add(new ActiveEvent { type = type, startHour = S.hour, endHour = S.hour + hours, magnitude = mag, label = label, global = true });
+        }
+
+        void HourSite()
         {
             if (outageActive && powerShort) outageHadDowntime = true;
-            float gridKWh = Mathf.Max(0, loadKW - solarKW);
+            BatteryHour();
+            float gridKWh = Mathf.Max(0, loadKW - solarKW - batteryDischargeKW) + batteryChargeKW;
             gridKW = gridKWh;
             S.monthSolarKWh += Mathf.Min(loadKW, solarKW);
             S.monthGridKWh += gridKWh;
             AgeHardware();
-            TicketsHour();
         }
 
         void OnEventEnded(ActiveEvent e)
@@ -1191,7 +1449,6 @@ namespace DCT
 
         void DailyExtras()
         {
-            DailyWeather();
             DailyTickets();
             DailyRivals();
             if (S.Day % 7 == 0 || S.candidates.Count == 0) RefreshCandidates();
@@ -1201,10 +1458,10 @@ namespace DCT
                 money = S.money,
                 revenue = MonthlyRevenue,
                 cost = hourlyCost * 24,
-                loadKW = loadKW,
-                solarKW = solarCapKW,
+                loadKW = company.TotalLoadKW,
+                solarKW = company.sims.Sum(x => x.solarCapKW),
                 uptime = S.contracts.Where(c => c.status == ContractStatus.Active).Select(c => c.service).DefaultIfEmpty(1f).Average() * 100f,
-                temp = zones.Count > 0 ? zones.Max(z => z.temp) : 20f,
+                temp = company.sims.SelectMany(x => x.zones).Select(z => z.temp).DefaultIfEmpty(20f).Max(),
             });
             if (S.dayStats.Count > 180) S.dayStats.RemoveAt(0);
             CheckAchievements();
@@ -1213,9 +1470,11 @@ namespace DCT
 
         void MonthlyExtras()
         {
-            float total = S.monthSolarKWh + S.monthGridKWh;
-            S.lastSolarShare = total > 0 ? S.monthSolarKWh / total : 0;
-            S.monthSolarKWh = S.monthGridKWh = 0;
+            float solar = 0, grid = 0;
+            for (int i = 0; i < company.sims.Count; i++)
+                company.WithSite(i, () => { solar += S.monthSolarKWh; grid += S.monthGridKWh; S.monthSolarKWh = S.monthGridKWh = 0; });
+            float total = solar + grid;
+            S.lastSolarShare = total > 0 ? solar / total : 0;
         }
 
         void EcoCheck(Contract c)

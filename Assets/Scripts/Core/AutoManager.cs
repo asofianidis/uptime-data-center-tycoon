@@ -235,6 +235,17 @@ namespace DCT
             return true;
         }
 
+        /// <summary>Runs an L-shaped cable tray from the rack to the nearest core switch, then cables it.</summary>
+        public static void LayTrayToCore(Simulation sim, PlacedObject rack)
+        {
+            var core = sim.ObjectsOfKind(FacilityKind.CoreSwitch).Where(c => !c.failed && sim.FreePorts(c) > 0)
+                .OrderBy(c => Mathf.Abs(c.x - rack.x) + Mathf.Abs(c.y - rack.y)).FirstOrDefault();
+            if (core == null) return;
+            sim.PaintFlag(new RectInt(Mathf.Min(rack.x, core.x), rack.y, Mathf.Abs(rack.x - core.x) + 1, 1), GameState.FlagTray, true, out _);
+            sim.PaintFlag(new RectInt(core.x, Mathf.Min(rack.y, core.y), 1, Mathf.Abs(rack.y - core.y) + 1), GameState.FlagTray, true, out _);
+            sim.AutoConnect(rack);
+        }
+
         static PlacedObject GetRack(Simulation sim, Contract c)
         {
             var free = sim.Racks.FirstOrDefault(r => r.contractId < 0 && (c.type != ContractType.Colocation || !r.devices.Any(d => Catalog.Device(d.def).kind == DeviceKind.Server))
@@ -255,7 +266,7 @@ namespace DCT
                 var sw = Catalog.Devices.Where(d => d.kind == DeviceKind.Switch && sim.IsUnlocked(d.id)).OrderByDescending(d => d.uplinkGbps).First();
                 sim.AddDevice(rack, sw);
             }
-            if (rack.linkCore < 0) sim.AutoConnect(rack);
+            if (rack.linkCore < 0 && sim.AutoConnect(rack) != null) LayTrayToCore(sim, rack);
             var con = rack.contractId > 0 ? sim.FindContract(rack.contractId) : null;
             if (con != null && con.redundant) sim.MakeRedundant(rack);
             foreach (var d in rack.devices.Where(x => x.failed).ToList())

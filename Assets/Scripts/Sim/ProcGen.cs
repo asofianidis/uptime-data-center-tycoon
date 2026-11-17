@@ -141,6 +141,7 @@ namespace DCT
                 case "Renewal": return "Returning customer.";
                 case "Eco": return "Wants 25%+ of your energy from solar each month; pays 10% more.";
                 case "Referral": return "Referred by a happy customer; pays 12% more.";
+                case "Geo-redundant": return "Needs online racks in at least two of your sites; pays 25% more.";
                 case "Redundant": return "Every rack needs dual PDU, two ToR switches and two core uplinks; pays 35% more.";
             }
             return t;
@@ -253,6 +254,12 @@ namespace DCT
                 c.redundant = true;
                 c.traits.Add("Redundant");
                 traitMul *= 1.35f;
+            }
+            if (s.sites.Count >= 2 && level >= 4 && Chance(r, 0.2))
+            {
+                c.geoRedundant = true;
+                c.traits.Add("Geo-redundant");
+                traitMul *= 1.25f;
             }
             foreach (var e in s.events) if (e.type == "pricewar") traitMul *= e.magnitude;
             c.reqBandwidth = Mathf.Max(0.5f, Mathf.Round(c.reqBandwidth * 2f) / 2f);

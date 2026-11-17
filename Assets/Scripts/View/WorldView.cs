@@ -12,8 +12,9 @@ namespace DCT
         public int highlightContract = -1;
 
         Material litMat, transMat, unlitMat;
-        GameObject groundGO, wallsGO, sceneryGO, gridGO;
-        Mesh groundMesh, wallsMesh, sceneryMesh, gridMesh;
+        GameObject groundGO, wallsGO, sceneryGO, gridGO, traysGO, hintGO;
+        Mesh groundMesh, wallsMesh, sceneryMesh, gridMesh, traysMesh, hintMesh;
+        Material hintMat;
         Color[] groundColors;
         Color[] baseGroundColors;
         int builtTilesVersion = -1, builtObjectsVersion = -1;
@@ -49,6 +50,10 @@ namespace DCT
             wallsGO = MakeGO("Walls", litMat, out wallsMesh);
             sceneryGO = MakeGO("Scenery", litMat, out sceneryMesh);
             gridGO = MakeGO("Grid", transMat, out gridMesh);
+            traysGO = MakeGO("Trays", litMat, out traysMesh);
+            hintGO = MakeGO("Hint", transMat, out hintMesh);
+            hintMat = hintGO.GetComponent<MeshRenderer>().material;
+            hintGO.SetActive(false);
             gridGO.GetComponent<MeshRenderer>().material.color = new Color(1, 1, 1, 0.12f);
             groundGO.GetComponent<MeshRenderer>().material.SetFloat("_Glossiness", 0.1f);
 
@@ -114,6 +119,8 @@ namespace DCT
             UpdateStaff();
             UpdateEnvironment();
             gridGO.SetActive(showGrid);
+            traysGO.SetActive(showCables || (gm != null && gm.tool == Tool.Tray));
+            if (hintGO.activeSelf) hintMat.color = new Color(1f, 0.85f, 0.2f, 0.25f + 0.25f * Mathf.PingPong(Time.unscaledTime * 2f, 1f));
         }
 
         // ------------------------------------------------------------------ ground
@@ -145,6 +152,11 @@ namespace DCT
                         bool owned = S.Owned(x, y);
                         c = owned ? new Color(0.36f + n * 0.04f, 0.56f + n * 0.05f, 0.27f) : new Color(0.24f + n * 0.03f, 0.38f + n * 0.04f, 0.2f);
                         if (owned && (x == S.ownX0 || y == S.ownY0 || x == S.ownX1 - 1 || y == S.ownY1 - 1)) c = MeshBuilder.Shade(c, 0.85f);
+                    }
+                    else if (room == RoomType.ServerHall && S.HasFlag(x, y, GameState.FlagRaised))
+                    {
+                        // Raised floor: brighter perforated tiles.
+                        c = ((x + y) & 1) == 0 ? new Color(0.88f, 0.9f, 0.95f) : new Color(0.8f, 0.84f, 0.92f);
                     }
                     else
                     {
@@ -213,8 +225,8 @@ namespace DCT
                     if (north != RoomType.None && north != room && !Doorway(x, y, false))
                         mb.Box(new Vector3(x + 0.5f, intH * 0.5f, y + 1), new Vector3(1f, intH, intT), WallColor(room, north));
                 }
-            // Corner posts on exterior to hide seams
             mb.ToMesh(wallsMesh);
+            BuildTrays();
         }
 
         bool Doorway(int x, int y, bool vertical)
@@ -308,6 +320,52 @@ namespace DCT
             }
         }
 
+        public const float TrayHeight = 2.32f;
+
+        void BuildTrays()
+        {
+            var S = sim.S;
+            var mb = new MeshBuilder();
+            Color steel = new Color(0.62f, 0.64f, 0.68f);
+            Color rail = new Color(0.95f, 0.75f, 0.15f);
+            if (S.flags != null)
+                for (int y = 0; y < S.mapH; y++)
+                    for (int x = 0; x < S.mapW; x++)
+                    {
+                        if (!S.HasFlag(x, y, GameState.FlagTray)) continue;
+                        var c = new Vector3(x + 0.5f, TrayHeight, y + 0.5f);
+                        mb.Box(c, new Vector3(0.34f, 0.04f, 0.34f), steel);
+                        if (S.HasFlag(x + 1, y, GameState.FlagTray)) mb.Box(c + new Vector3(0.5f, 0, 0), new Vector3(0.66f, 0.04f, 0.3f), steel);
+                        if (S.HasFlag(x, y + 1, GameState.FlagTray)) mb.Box(c + new Vector3(0, 0, 0.5f), new Vector3(0.3f, 0.04f, 0.66f), steel);
+                        mb.Box(c + new Vector3(0, 0.04f, 0.16f), new Vector3(0.34f, 0.05f, 0.02f), rail);
+                        mb.Box(c + new Vector3(0, 0.04f, -0.16f), new Vector3(0.34f, 0.05f, 0.02f), rail);
+                        // Hanger rod
+                        mb.Box(c + new Vector3(0, 0.35f, 0), new Vector3(0.02f, 0.7f, 0.02f), steel);
+                    }
+            mb.ToMesh(traysMesh);
+        }
+
+        public void ShowHint(RectInt r)
+        {
+            if (!hintGO.activeSelf || lastHint != r)
+            {
+                var mb = new MeshBuilder();
+                float t = 0.12f;
+                mb.FlatQuad(r.xMin, r.yMin, r.xMax, r.yMax, 0.07f, new Color(1, 1, 1, 0.35f));
+                mb.FlatQuad(r.xMin, r.yMin, r.xMax, r.yMin + t, 0.08f, Color.white);
+                mb.FlatQuad(r.xMin, r.yMax - t, r.xMax, r.yMax, 0.08f, Color.white);
+                mb.FlatQuad(r.xMin, r.yMin, r.xMin + t, r.yMax, 0.08f, Color.white);
+                mb.FlatQuad(r.xMax - t, r.yMin, r.xMax, r.yMax, 0.08f, Color.white);
+                mb.ToMesh(hintMesh);
+                lastHint = r;
+            }
+            hintGO.SetActive(true);
+        }
+
+        RectInt lastHint;
+
+        public void HideHint() { if (hintGO != null) hintGO.SetActive(false); }
+
         public void ForceRebuildObject(int id)
         {
             if (views.TryGetValue(id, out var v)) { Destroy(v.go); views.Remove(id); }
@@ -388,6 +446,22 @@ namespace DCT
             var a = ObjectCenter(Catalog.Facility(o.def), o.x, o.y, o.rot);
             var b = ObjectCenter(Catalog.Facility(core.def), core.x, core.y, core.rot);
             float tray = 2.45f + (o.id % 5) * 0.04f + extraOffset;
+            var trayPath = sim.TrayPath(o, core);
+            if (trayPath != null && trayPath.Count > 0)
+            {
+                float ty = TrayHeight + 0.06f + extraOffset * 0.3f;
+                var list = new List<Vector3> { a + Vector3.up * views[o.id].height };
+                foreach (var t in trayPath) list.Add(new Vector3(t.x + 0.5f, ty, t.y + 0.5f));
+                list.Add(b + Vector3.up * (views.TryGetValue(core.id, out var cv0) ? cv0.height : 2f));
+                line.positionCount = list.Count;
+                line.SetPositions(list.ToArray());
+                sim.racks.TryGetValue(o.id, out var info0);
+                float g0 = info0 != null ? info0.linkGbps : 10f;
+                Color col0 = g0 >= 400 ? new Color(0.85f, 0.4f, 1f) : g0 >= 100 ? new Color(0.2f, 0.95f, 0.9f) : g0 >= 40 ? new Color(0.3f, 0.6f, 1f) : new Color(1f, 0.75f, 0.2f);
+                if (extraOffset > 0) col0 = Color.Lerp(col0, Color.white, 0.35f);
+                line.startColor = line.endColor = col0;
+                return;
+            }
             float ha = views[o.id].height, hb = views.TryGetValue(core.id, out var cv) ? cv.height : 2f;
             float off = ((o.id % 7) - 3) * 0.05f + extraOffset;
             var pts = new[]

@@ -5,7 +5,7 @@ using UnityEngine;
 
 namespace DCT
 {
-    public enum Tool { Select, Foundation, Room, Demolish, Place, Connect }
+    public enum Tool { Select, Foundation, Room, Demolish, Place, Connect, Tray, Raised }
 
     public class GameManager : MonoBehaviour
     {
@@ -142,11 +142,40 @@ namespace DCT
             S.weather = "Clear";
             S.hour = S.Day * 24 + 13;
 
+            // Cable trays along the rack rows, cables re-routed over them.
+            foreach (var rk in sim.Racks.Take(8).ToList()) { sim.Disconnect(rk); AutoManager.LayTrayToCore(sim, rk); }
+            cam.SnapTo(center, 16f);
+            yield return Shot("11b_cable_trays");
+
+            // Second site in another city.
+            S.money += 2_000_000;
+            S.xp = Mathf.Max(S.xp, Catalog.XpForLevel(Company.MinLevelForSites));
+            ui.OpenWindow(GameUI.Window.Sites);
+            yield return Shot("11c_sites_window");
+            ui.OpenWindow(GameUI.Window.None);
+            OpenSite(sim.company.SiteCandidates()[1]);
+            AutoManager.BuildStarter(sim);
+            for (int h = 0; h < 30; h++) sim.TickHour();
+            sim.popups.Clear();
+            var S2 = sim.S;
+            cam.SnapTo(new Vector3((S2.ownX0 + S2.ownX1) * 0.5f, 0, (S2.ownY0 + S2.ownY1) * 0.5f), 24f);
+            yield return Shot("11d_second_site");
+            ui.OpenWindow(GameUI.Window.Sites);
+            yield return Shot("11e_sites_list");
+            ui.OpenWindow(GameUI.Window.Staff);
+            yield return Shot("11f_staff_shifts");
+            ui.OpenWindow(GameUI.Window.None);
+            SwitchSite(0);
+
             ui.OpenWindow(GameUI.Window.Settings);
             yield return Shot("12_settings");
             ui.OpenWindow(GameUI.Window.None);
             inGame = false;
             yield return Shot("13_mainmenu");
+            StartNewGame(777, "Normal", "sandbox");
+            sim.S.tutorial = true; sim.S.tutorialStep = 2;
+            sim.popups.Clear();
+            yield return Shot("14_tutorial");
             Application.Quit();
         }
 
@@ -232,7 +261,7 @@ namespace DCT
         {
             if (Time.unscaledTime - lastSnapshot < 0.5f && undoStack.Count > 0) return;
             lastSnapshot = Time.unscaledTime;
-            undoStack.Add(JsonUtility.ToJson(sim.S));
+            undoStack.Add(sim.S.Serialize());
             if (undoStack.Count > 30) undoStack.RemoveAt(0);
         }
 
@@ -245,6 +274,54 @@ namespace DCT
             LoadState(s, true);
             lastSnapshot = -10f;
             ui.Toast("Undone.", 0);
+        }
+
+        public static string ThumbPath(int slot) => SavePath(slot) + ".png";
+
+        /// <summary>Renders the world camera (without UI) into a small PNG next to the save file.</summary>
+        void CaptureThumb(int slot)
+        {
+            try
+            {
+                var c = Camera.main;
+                var rt = RenderTexture.GetTemporary(320, 180, 24);
+                var prev = c.targetTexture;
+                c.targetTexture = rt;
+                c.Render();
+                c.targetTexture = prev;
+                var active = RenderTexture.active;
+                RenderTexture.active = rt;
+                var tex = new Texture2D(320, 180, TextureFormat.RGB24, false);
+                tex.ReadPixels(new Rect(0, 0, 320, 180), 0, 0);
+                tex.Apply();
+                RenderTexture.active = active;
+                RenderTexture.ReleaseTemporary(rt);
+                File.WriteAllBytes(ThumbPath(slot), tex.EncodeToPNG());
+                Destroy(tex);
+                ui.InvalidateThumb(slot);
+            }
+            catch (System.Exception e) { Debug.LogWarning("Thumbnail failed: " + e.Message); }
+        }
+
+        // ================================================================ sites
+        public void SwitchSite(int i)
+        {
+            if (sim == null || i == sim.S.activeSite || i < 0 || i >= sim.company.sims.Count) return;
+            sim = sim.company.SetActive(i);
+            view.ResetSim(sim);
+            selection.Clear();
+            SetTool(Tool.Select);
+            var S = sim.S;
+            cam.boundsMax = new Vector2(S.mapW, S.mapH);
+            cam.SnapTo(new Vector3((S.ownX0 + S.ownX1) * 0.5f, 0, (S.ownY0 + S.ownY1) * 0.5f), 26f);
+            ui.Toast($"Now viewing {S.siteName} ({S.city.name}, {S.city.climate}).", 0);
+        }
+
+        public void OpenSite(CityProfile city)
+        {
+            var created = sim.company.OpenSite(city);
+            if (created == null) { ui.Toast(sim.company.CanOpenSite(city) ?? "Could not open site", 2); return; }
+            SwitchSite(sim.company.sims.IndexOf(created));
         }
 
         public static string SlotMeta(int slot)
@@ -264,8 +341,9 @@ namespace DCT
             if (sim == null) return false;
             try
             {
-                File.WriteAllText(SavePath(slot), JsonUtility.ToJson(sim.S));
+                File.WriteAllText(SavePath(slot), sim.S.Serialize());
                 WriteMeta(slot);
+                CaptureThumb(slot);
                 ui.Toast($"Game saved (slot {slot}).", 1);
                 return true;
             }
@@ -312,7 +390,7 @@ namespace DCT
                     if (sim.popups.Count > 0) { hourAccum = 0; break; }
                 }
                 if (hourAccum > 8f) hourAccum = 0f;
-                if (sim.AutoSaveRequested) { sim.AutoSaveRequested = false; if (Settings.Autosave) { try { File.WriteAllText(SavePath(0), JsonUtility.ToJson(sim.S)); WriteMeta(0); } catch { } } }
+                if (sim.AutoSaveRequested) { sim.AutoSaveRequested = false; if (Settings.Autosave) { try { File.WriteAllText(SavePath(0), sim.S.Serialize()); WriteMeta(0); CaptureThumb(0); } catch { } } }
             }
 
             HandleHotkeys();
@@ -464,6 +542,8 @@ namespace DCT
                 case Tool.Foundation:
                 case Tool.Room:
                 case Tool.Demolish:
+                case Tool.Tray:
+                case Tool.Raised:
                 {
                     if (Input.GetMouseButtonDown(0)) { dragging = true; dragStart = tile; }
                     var rect = dragging ? Simulation.Normalize(dragStart, tile) : new RectInt(tile.x, tile.y, 1, 1);
@@ -471,14 +551,18 @@ namespace DCT
                     Color col;
                     if (tool == Tool.Foundation) { n = sim.BuildFoundation(rect, false, out cost); col = new Color(0.9f, 0.9f, 0.9f, 0.3f); what = $"Build {n} foundation tile(s)"; }
                     else if (tool == Tool.Room) { n = sim.PaintRoom(rect, roomType, false, out cost); col = Catalog.RoomColor(roomType); col.a = 0.45f; what = $"Paint {n} tile(s) as {Catalog.RoomName(roomType)}"; }
+                    else if (tool == Tool.Tray) { n = sim.PaintFlag(rect, GameState.FlagTray, false, out cost); col = new Color(1f, 0.8f, 0.2f, 0.35f); what = $"Install {n} tile(s) of overhead cable tray"; }
+                    else if (tool == Tool.Raised) { n = sim.PaintFlag(rect, GameState.FlagRaised, false, out cost); col = new Color(0.6f, 0.8f, 1f, 0.35f); what = $"Install {n} tile(s) of raised floor"; }
                     else { n = sim.Demolish(rect, false, out cost, out what); col = new Color(1f, 0.25f, 0.2f, 0.3f); }
                     view.ShowRect(rect, col);
-                    toolHint = n > 0 ? $"{what}   {(cost >= 0 ? "Cost" : "Refund")}: ${Mathf.Abs(cost):N0}" : (tool == Tool.Room ? "Paint over existing building foundation" : tool == Tool.Foundation ? "Drag on owned, clear land" : "Nothing to demolish here");
+                    toolHint = n > 0 ? $"{what}   {(cost >= 0 ? "Cost" : "Refund")}: ${Mathf.Abs(cost):N0}" : (tool == Tool.Room ? "Paint over existing building foundation" : tool == Tool.Foundation ? "Drag on owned, clear land" : tool == Tool.Tray ? "Drag over building tiles to run overhead cable trays" : tool == Tool.Raised ? "Drag over Server Hall tiles" : "Nothing to demolish here");
                     if (dragging && Input.GetMouseButtonUp(0))
                     {
                         dragging = false;
                         if (tool == Tool.Foundation) sim.BuildFoundation(rect, true, out _);
                         else if (tool == Tool.Room) sim.PaintRoom(rect, roomType, true, out _);
+                        else if (tool == Tool.Tray) sim.PaintFlag(rect, GameState.FlagTray, true, out _);
+                        else if (tool == Tool.Raised) sim.PaintFlag(rect, GameState.FlagRaised, true, out _);
                         else sim.Demolish(rect, true, out _, out _);
                     }
                     break;

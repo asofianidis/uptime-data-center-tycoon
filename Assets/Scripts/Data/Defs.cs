@@ -5,7 +5,7 @@ namespace DCT
 {
     public enum RoomType { None = 0, Corridor = 1, ServerHall = 2, Network = 3, Power = 4, Office = 5, Outdoor = 99 }
     public enum DeviceKind { Server, Switch }
-    public enum FacilityKind { Rack, Cooling, CoreSwitch, Isp, Transformer, Switchgear, Ups, Generator, Desk, Solar, Suppression }
+    public enum FacilityKind { Rack, Cooling, CoreSwitch, Isp, Transformer, Switchgear, Ups, Generator, Desk, Solar, Suppression, Battery }
 
     /// <summary>Rack-mountable equipment (servers and top-of-rack switches).</summary>
     [System.Serializable]
@@ -47,6 +47,7 @@ namespace DCT
         public float rackKW;       // rack PDU limit
         public int staff;
         public string model;       // optional Resources/Models prefab (Blender asset)
+        public float capacityKWh;  // battery storage
         public int level = 1;
         public float research;
         public Color color = Color.gray;
@@ -161,6 +162,9 @@ namespace DCT
             new FacilityDef { id = "suppress", model = "suppress", name = "Fire Suppression System", kind = FacilityKind.Suppression, room = RoomType.ServerHall, cost = 12000, watts = 100, level = 2, research = 8000,
                 desc = "Inert-gas suppression for its whole server hall: fires are put out before they destroy hardware.", color = new Color(0.85f, 0.15f, 0.12f) },
 
+            new FacilityDef { id = "bess", name = "Battery Storage (BESS)", kind = FacilityKind.Battery, room = RoomType.Power, w = 2, h = 1, cost = 90000, supplyKW = 100, capacityKWh = 400, level = 4, research = 60000,
+                desc = "400 kWh lithium battery. Charges when power is cheap (night), discharges at the evening peak, and backs up the grid during outages.", color = new Color(0.2f, 0.45f, 0.35f) },
+
             // ---- Office ----
             new FacilityDef { id = "desk", model = "desk", name = "Technician Desk", kind = FacilityKind.Desk, room = RoomType.Office, cost = 1500, watts = 300, staff = 1, level = 1,
                 desc = "Workspace for one technician. Technicians repair failed hardware automatically.", color = new Color(0.55f, 0.4f, 0.28f) },
@@ -181,8 +185,20 @@ namespace DCT
             try
             {
                 var data = JsonUtility.FromJson<CatalogData>(ta.text);
-                if (data != null && data.devices != null && data.devices.Count > 0) { Devices.Clear(); Devices.AddRange(data.devices); }
-                if (data != null && data.facilities != null && data.facilities.Count > 0) { Facilities.Clear(); Facilities.AddRange(data.facilities); }
+                // JSON entries replace matching in-code entries by id; new in-code entries are kept.
+                if (data?.devices != null)
+                    foreach (var d in data.devices)
+                    {
+                        int i = Devices.FindIndex(x => x.id == d.id);
+                        if (i >= 0) Devices[i] = d; else Devices.Add(d);
+                    }
+                if (data?.facilities != null)
+                    foreach (var f in data.facilities)
+                    {
+                        int i = Facilities.FindIndex(x => x.id == f.id);
+                        if (i >= 0) { if (string.IsNullOrEmpty(f.model)) f.model = Facilities[i].model; if (f.capacityKWh <= 0) f.capacityKWh = Facilities[i].capacityKWh; Facilities[i] = f; }
+                        else Facilities.Add(f);
+                    }
                 deviceMap = null; facilityMap = null;
             }
             catch (System.Exception e) { Debug.LogWarning("catalog.json failed to load: " + e.Message); }
@@ -250,6 +266,7 @@ namespace DCT
                 case FacilityKind.Desk: return "Office";
                 case FacilityKind.Solar: return "Solar";
                 case FacilityKind.Suppression: return "Fire Safety";
+                case FacilityKind.Battery: return "Battery Storage";
             }
             return k.ToString();
         }
