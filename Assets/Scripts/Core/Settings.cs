@@ -16,6 +16,26 @@ namespace DCT
         public static bool WeatherFx = true;
         public static bool ShowStaff = true;
 
+        // ---- video
+        /// <summary>0 = borderless fullscreen, 1 = exclusive fullscreen, 2 = windowed.</summary>
+        public static int DisplayMode;
+        /// <summary>Requested resolution; 0 means "use the monitor's native resolution".</summary>
+        public static int ResW, ResH;
+        public static bool VSync = true;
+        /// <summary>Frame rate cap when VSync is off; 0 = unlimited.</summary>
+        public static int FpsCap = 120;
+        /// <summary>Index into QualitySettings.names; -1 = project default.</summary>
+        public static int Quality = -1;
+        /// <summary>MSAA sample count: 0, 2, 4 or 8.</summary>
+        public static int Msaa = 4;
+        /// <summary>0 = off, 1 = hard, 2 = soft.</summary>
+        public static int Shadows = 2;
+
+        public static readonly string[] DisplayModeNames = { "Borderless fullscreen", "Exclusive fullscreen", "Windowed" };
+        public static readonly int[] FpsCaps = { 30, 60, 75, 120, 144, 165, 240, 0 };
+        public static readonly int[] MsaaLevels = { 0, 2, 4, 8 };
+        public static readonly string[] ShadowNames = { "Off", "Hard", "Soft" };
+
         public static readonly List<KeyValuePair<string, KeyCode>> Defaults = new List<KeyValuePair<string, KeyCode>>
         {
             new KeyValuePair<string, KeyCode>("Pause", KeyCode.Space),
@@ -38,6 +58,7 @@ namespace DCT
             new KeyValuePair<string, KeyCode>("CamRight", KeyCode.E),
             new KeyValuePair<string, KeyCode>("QuickSave", KeyCode.F5),
             new KeyValuePair<string, KeyCode>("QuickLoad", KeyCode.F9),
+            new KeyValuePair<string, KeyCode>("Fullscreen", KeyCode.F11),
         };
 
         public static readonly Dictionary<string, KeyCode> Keys = new Dictionary<string, KeyCode>();
@@ -59,6 +80,14 @@ namespace DCT
                 DayNight = PlayerPrefs.GetInt("set_daynight", 1) == 1;
                 WeatherFx = PlayerPrefs.GetInt("set_weather", 1) == 1;
                 ShowStaff = PlayerPrefs.GetInt("set_staff", 1) == 1;
+                DisplayMode = Mathf.Clamp(PlayerPrefs.GetInt("set_dispmode", ModeIndex(Screen.fullScreenMode)), 0, 2);
+                ResW = PlayerPrefs.GetInt("set_resw", 0);
+                ResH = PlayerPrefs.GetInt("set_resh", 0);
+                VSync = PlayerPrefs.GetInt("set_vsync", 1) == 1;
+                FpsCap = PlayerPrefs.GetInt("set_fps", 120);
+                Quality = PlayerPrefs.GetInt("set_quality", -1);
+                Msaa = PlayerPrefs.GetInt("set_msaa", 4);
+                Shadows = Mathf.Clamp(PlayerPrefs.GetInt("set_shadows", 2), 0, 2);
                 foreach (var kv in Defaults)
                 {
                     int v = PlayerPrefs.GetInt("key_" + kv.Key, (int)kv.Value);
@@ -81,6 +110,14 @@ namespace DCT
                 PlayerPrefs.SetInt("set_daynight", DayNight ? 1 : 0);
                 PlayerPrefs.SetInt("set_weather", WeatherFx ? 1 : 0);
                 PlayerPrefs.SetInt("set_staff", ShowStaff ? 1 : 0);
+                PlayerPrefs.SetInt("set_dispmode", DisplayMode);
+                PlayerPrefs.SetInt("set_resw", ResW);
+                PlayerPrefs.SetInt("set_resh", ResH);
+                PlayerPrefs.SetInt("set_vsync", VSync ? 1 : 0);
+                PlayerPrefs.SetInt("set_fps", FpsCap);
+                PlayerPrefs.SetInt("set_quality", Quality);
+                PlayerPrefs.SetInt("set_msaa", Msaa);
+                PlayerPrefs.SetInt("set_shadows", Shadows);
                 foreach (var kv in Keys) PlayerPrefs.SetInt("key_" + kv.Key, (int)kv.Value);
                 PlayerPrefs.Save();
             }
@@ -92,6 +129,103 @@ namespace DCT
             foreach (var kv in Defaults) Keys[kv.Key] = kv.Value;
             Save();
         }
+
+        // ---------------------------------------------------------------- video
+        public static FullScreenMode ToFullScreenMode(int mode) =>
+            mode == 1 ? (Application.platform == RuntimePlatform.OSXPlayer ? FullScreenMode.MaximizedWindow : FullScreenMode.ExclusiveFullScreen)
+            : mode == 2 ? FullScreenMode.Windowed : FullScreenMode.FullScreenWindow;
+
+        public static int ModeIndex(FullScreenMode m) =>
+            m == FullScreenMode.ExclusiveFullScreen || m == FullScreenMode.MaximizedWindow ? 1 : m == FullScreenMode.Windowed ? 2 : 0;
+
+        public static Vector2Int NativeResolution
+        {
+            get
+            {
+                var r = Screen.currentResolution;
+                return r.width > 0 ? new Vector2Int(r.width, r.height) : new Vector2Int(Screen.width, Screen.height);
+            }
+        }
+
+        /// <summary>Distinct resolutions the monitor supports (smallest first), always including the native one.</summary>
+        public static List<Vector2Int> AvailableResolutions()
+        {
+            var list = new List<Vector2Int>();
+            try { list.AddRange(Screen.resolutions.Select(r => new Vector2Int(r.width, r.height))); } catch { }
+            var native = NativeResolution;
+            list.Add(native);
+            if (list.Count == 1)
+                foreach (var r in new[] { new Vector2Int(1280, 720), new Vector2Int(1600, 900), new Vector2Int(1920, 1080), new Vector2Int(2560, 1440), new Vector2Int(3840, 2160) })
+                    if (r.x <= native.x && r.y <= native.y) list.Add(r);
+            return list.Where(r => (r.x >= 1024 && r.y >= 600) || r == native).Distinct()
+                .OrderBy(r => r.x * r.y).ThenBy(r => r.x).ToList();
+        }
+
+        public static Vector2Int EffectiveResolution(int w, int h) => w > 0 && h > 0 ? new Vector2Int(w, h) : NativeResolution;
+
+        /// <summary>Applies the display mode and resolution. Windowed sizes as large as the desktop are shrunk to fit.</summary>
+        public static void ApplyDisplay()
+        {
+            if (Application.isBatchMode) return;
+            var mode = ToFullScreenMode(DisplayMode);
+            var res = EffectiveResolution(ResW, ResH);
+            if (mode == FullScreenMode.Windowed)
+            {
+                var n = NativeResolution;
+                if (res.x >= n.x || res.y >= n.y) res = WindowedFallback(n);
+            }
+            Screen.SetResolution(res.x, res.y, mode);
+        }
+
+        static Vector2Int WindowedFallback(Vector2Int native)
+        {
+            int w = Mathf.RoundToInt(native.x * 0.8f), h = Mathf.RoundToInt(native.y * 0.8f);
+            return new Vector2Int(Mathf.Max(1024, w), Mathf.Max(600, h));
+        }
+
+        /// <summary>Toggles between windowed and the last fullscreen mode (F11 / Alt+Enter).</summary>
+        public static void ToggleFullscreen()
+        {
+            if (DisplayMode == 2)
+            {
+                DisplayMode = PlayerPrefs.GetInt("set_lastfs", 0);
+                ResW = ResH = 0;
+            }
+            else
+            {
+                PlayerPrefs.SetInt("set_lastfs", DisplayMode);
+                DisplayMode = 2;
+                var r = WindowedFallback(NativeResolution);
+                ResW = r.x; ResH = r.y;
+            }
+            ApplyDisplay();
+            Save();
+        }
+
+        /// <summary>Applies quality preset, VSync, frame cap, anti-aliasing and shadows.</summary>
+        public static void ApplyGraphics()
+        {
+            if (Quality >= 0 && Quality < QualitySettings.names.Length && QualitySettings.GetQualityLevel() != Quality)
+                QualitySettings.SetQualityLevel(Quality, true);
+            QualitySettings.vSyncCount = VSync ? 1 : 0;
+            Application.targetFrameRate = VSync || FpsCap <= 0 ? -1 : FpsCap;
+            QualitySettings.antiAliasing = MsaaLevels.Contains(Msaa) ? Msaa : 0;
+            QualitySettings.shadows = Shadows == 0 ? ShadowQuality.Disable : Shadows == 1 ? ShadowQuality.HardOnly : ShadowQuality.All;
+            QualitySettings.shadowDistance = 90f;
+        }
+
+        /// <summary>Selects a quality preset and adopts its anti-aliasing / shadow defaults.</summary>
+        public static void SetQualityPreset(int level)
+        {
+            Quality = Mathf.Clamp(level, 0, QualitySettings.names.Length - 1);
+            QualitySettings.SetQualityLevel(Quality, true);
+            Msaa = QualitySettings.antiAliasing;
+            Shadows = QualitySettings.shadows == ShadowQuality.Disable ? 0 : QualitySettings.shadows == ShadowQuality.HardOnly ? 1 : 2;
+            ApplyGraphics();
+            Save();
+        }
+
+        public static string ResName(int w, int h) { var r = EffectiveResolution(w, h); return $"{r.x} x {r.y}" + (w <= 0 ? " (native)" : ""); }
 
         public static KeyCode Key(string action) { Load(); return Keys.TryGetValue(action, out var k) ? k : KeyCode.None; }
         public static bool Down(string action) => Input.GetKeyDown(Key(action));

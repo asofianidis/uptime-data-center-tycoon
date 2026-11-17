@@ -67,6 +67,7 @@ namespace DCT
 
         public void OpenWindow(Window w)
         {
+            if (w == Window.Settings && window != Window.Settings) ResetPendingDisplay();
             window = w;
             if (w != Window.None) { buildMenuOpen = false; roomMenuOpen = false; }
             windowSection?.Invalidate();
@@ -152,6 +153,7 @@ namespace DCT
             if (!built || root?.panel == null) return;
             ApplyScale();
             HandleRebind();
+            TickDisplayRevert();
             var focused = root.panel.focusController?.focusedElement;
             textFocus = focused is TextField || rebinding != null;
 

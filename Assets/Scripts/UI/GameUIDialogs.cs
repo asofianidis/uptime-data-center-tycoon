@@ -106,6 +106,7 @@ namespace DCT
             var p = ModalPanel(r, "Settings", 640, 680);
             var sv = K.Scroll(p);
             var c = sv.contentContainer;
+            BuildVideo(c, s);
             K.Text(c, "DISPLAY", "section-title");
             SliderRow(c, "UI scale", Settings.UiScale, 0.7f, 1.6f, v => Settings.UiScale = v, v => $"x{v:0.00}");
             ToggleRow(c, s, "Day/night cycle", () => Settings.DayNight, v => Settings.DayNight = v);
@@ -127,6 +128,131 @@ namespace DCT
                 K.Btn(s, row, () => rebinding == action ? "press a key..." : Settings.KeyName(action), () => { rebinding = action; }, null, () => rebinding == action, "btn-small").style.width = 150;
             }
             K.Btn(c, "Reset keys to defaults", () => { Settings.ResetKeys(); rebinding = null; modalSection.Invalidate(); });
+        }
+
+        // ---------------------------------------------------------------- video
+        // Display mode / resolution are staged and only applied with "Apply", followed by a
+        // 15 second "keep these settings?" countdown that reverts automatically if not confirmed.
+        const float DisplayRevertSeconds = 15f;
+        int pendMode, pendW, pendH;
+        int revMode, revW, revH;
+        float revertAt = -1f;
+
+        void ResetPendingDisplay()
+        {
+            // A window may have been resized by dragging its edges (or sized by command-line args): adopt its real size.
+            if (Settings.DisplayMode == 2 && Settings.ModeIndex(Screen.fullScreenMode) == 2 && !Application.isEditor)
+            {
+                Settings.ResW = Screen.width;
+                Settings.ResH = Screen.height;
+            }
+            pendMode = Settings.DisplayMode;
+            pendW = Settings.ResW;
+            pendH = Settings.ResH;
+        }
+
+        /// <summary>Called after the display changed outside the settings window (F11 / Alt+Enter).</summary>
+        public void OnDisplayChanged()
+        {
+            revertAt = -1f;
+            ResetPendingDisplay();
+        }
+
+        bool DisplayDirty => pendMode != Settings.DisplayMode || Settings.EffectiveResolution(pendW, pendH) != Settings.EffectiveResolution(Settings.ResW, Settings.ResH);
+
+        void ApplyPendingDisplay()
+        {
+            revMode = Settings.DisplayMode; revW = Settings.ResW; revH = Settings.ResH;
+            Settings.DisplayMode = pendMode; Settings.ResW = pendW; Settings.ResH = pendH;
+            Settings.ApplyDisplay();
+            Settings.Save();
+            revertAt = Time.unscaledTime + DisplayRevertSeconds;
+        }
+
+        void RevertDisplay()
+        {
+            Settings.DisplayMode = revMode; Settings.ResW = revW; Settings.ResH = revH;
+            Settings.ApplyDisplay();
+            Settings.Save();
+            revertAt = -1f;
+            ResetPendingDisplay();
+        }
+
+        void TickDisplayRevert()
+        {
+            if (revertAt < 0) return;
+            // Leaving the settings window counts as accepting the new mode.
+            if (window != Window.Settings) { revertAt = -1f; return; }
+            if (Time.unscaledTime >= revertAt) { RevertDisplay(); Toast("Display settings reverted.", 2); }
+        }
+
+        void CycleResolution(int dir)
+        {
+            var list = Settings.AvailableResolutions();
+            int i = list.IndexOf(Settings.EffectiveResolution(pendW, pendH));
+            i = i < 0 ? list.Count - 1 : (i + dir + list.Count) % list.Count;
+            var r = list[i];
+            if (r == Settings.NativeResolution) { pendW = pendH = 0; }
+            else { pendW = r.x; pendH = r.y; }
+        }
+
+        int QualityLevel => Settings.Quality >= 0 ? Settings.Quality : QualitySettings.GetQualityLevel();
+
+        void BuildVideo(VisualElement c, Scope s)
+        {
+            K.Text(c, "VIDEO", "section-title");
+            ChoiceRow(c, s, "Display mode", () => Settings.DisplayModeNames[pendMode], d => pendMode = (pendMode + d + 3) % 3);
+            ChoiceRow(c, s, "Resolution", () => Settings.ResName(pendW, pendH), CycleResolution);
+            var row = K.Row(c);
+            var status = K.Text(s, row, () => revertAt >= 0
+                ? $"Keep these settings? Reverting in {Mathf.CeilToInt(revertAt - Time.unscaledTime)}s"
+                : $"Current: {Screen.width} x {Screen.height}, {Settings.DisplayModeNames[Settings.ModeIndex(Screen.fullScreenMode)].ToLowerInvariant()}", "small");
+            status.style.width = 330;
+            status.style.alignSelf = Align.Center;
+            var apply = K.Btn(s, row, () => "Apply", ApplyPendingDisplay, () => DisplayDirty && revertAt < 0, null, "btn-small");
+            apply.style.width = 80;
+            K.Show(s, apply, () => revertAt < 0);
+            var keep = K.Btn(row, "Keep", () => { revertAt = -1f; }, "btn-small", "on");
+            keep.style.width = 70;
+            K.Show(s, keep, () => revertAt >= 0);
+            var revert = K.Btn(row, "Revert", RevertDisplay, "btn-small");
+            revert.style.width = 70;
+            K.Show(s, revert, () => revertAt >= 0);
+            K.Text(c, $"Tip: [{Settings.KeyName("Fullscreen")}] or Alt+Enter toggles fullscreen at any time.", "small", "dim");
+
+            ChoiceRow(c, s, "Graphics quality", () => QualitySettings.names.Length > 0 ? QualitySettings.names[Mathf.Clamp(QualityLevel, 0, QualitySettings.names.Length - 1)] : "Default",
+                d => Settings.SetQualityPreset(Mathf.Clamp(QualityLevel + d, 0, QualitySettings.names.Length - 1)));
+            ChoiceRow(c, s, "Anti-aliasing", () => Settings.Msaa <= 1 ? "Off" : $"MSAA {Settings.Msaa}x", d =>
+            {
+                int i = Array.IndexOf(Settings.MsaaLevels, Settings.Msaa);
+                Settings.Msaa = Settings.MsaaLevels[Mathf.Clamp((i < 0 ? 0 : i) + d, 0, Settings.MsaaLevels.Length - 1)];
+                Settings.ApplyGraphics(); Settings.Save();
+            });
+            ChoiceRow(c, s, "Shadows", () => Settings.ShadowNames[Settings.Shadows], d =>
+            {
+                Settings.Shadows = Mathf.Clamp(Settings.Shadows + d, 0, 2);
+                Settings.ApplyGraphics(); Settings.Save();
+            });
+            ToggleRow(c, s, "VSync", () => Settings.VSync, v => { Settings.VSync = v; Settings.ApplyGraphics(); });
+            ChoiceRow(c, s, "Frame rate limit", () => Settings.VSync ? "(VSync on)" : Settings.FpsCap <= 0 ? "Unlimited" : $"{Settings.FpsCap} fps", d =>
+            {
+                int i = Array.IndexOf(Settings.FpsCaps, Settings.FpsCap);
+                if (i < 0) i = Array.IndexOf(Settings.FpsCaps, 120);
+                Settings.FpsCap = Settings.FpsCaps[Mathf.Clamp(i + d, 0, Settings.FpsCaps.Length - 1)];
+                Settings.ApplyGraphics(); Settings.Save();
+            }, () => !Settings.VSync);
+        }
+
+        void ChoiceRow(VisualElement c, Scope s, string name, Func<string> value, Action<int> step, Func<bool> enabled = null)
+        {
+            var row = K.Row(c);
+            K.Text(row, name).style.width = 170;
+            K.Btn(s, row, () => "<", () => step(-1), enabled, null, "btn-small").style.width = 36;
+            var l = K.Text(s, row, value);
+            l.style.width = 220;
+            l.style.alignSelf = Align.Center;
+            l.style.unityTextAlign = TextAnchor.MiddleCenter;
+            K.Btn(s, row, () => ">", () => step(+1), enabled, null, "btn-small").style.width = 36;
         }
 
         void SliderRow(VisualElement c, string name, float value, float min, float max, Action<float> set, Func<float, string> fmt)

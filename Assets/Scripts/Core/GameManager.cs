@@ -56,10 +56,12 @@ namespace DCT
         {
             if (I != null && I != this) { Destroy(gameObject); return; }
             I = this;
-            Application.targetFrameRate = 120;
             Settings.Load();
+            Settings.ApplyGraphics();
+            // Re-assert the saved display mode/resolution, unless a capture run sized the window itself.
+            if (System.Array.IndexOf(System.Environment.GetCommandLineArgs(), "-shotdir") < 0 && PlayerPrefs.HasKey("set_dispmode"))
+                Settings.ApplyDisplay();
             Catalog.EnsureLoaded();
-            QualitySettings.shadowDistance = 90f;
             SetupScene();
         }
 
@@ -422,6 +424,15 @@ namespace DCT
         {
             cam.inputEnabled = inGame && !ui.ModalOpen && !ui.textFocus;
             cam.blockScroll = ui.IsPointerOverUI();
+            if (!ui.textFocus)
+            {
+                bool alt = Input.GetKey(KeyCode.LeftAlt) || Input.GetKey(KeyCode.RightAlt);
+                if (Settings.Down("Fullscreen") || (alt && (Input.GetKeyDown(KeyCode.Return) || Input.GetKeyDown(KeyCode.KeypadEnter))))
+                {
+                    Settings.ToggleFullscreen();
+                    ui.OnDisplayChanged();
+                }
+            }
             if (!inGame || sim == null) return;
 
             bool paused = ui.ModalOpen || sim.popups.Count > 0 || sim.S.gameOver;
