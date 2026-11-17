@@ -1,0 +1,422 @@
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using UnityEngine;
+
+namespace DCT
+{
+    public enum Tool { Select, Foundation, Room, Demolish, Place, Connect }
+
+    public class GameManager : MonoBehaviour
+    {
+        public static GameManager I;
+
+        public Simulation sim;
+        public WorldView view;
+        public CameraController cam;
+        public GameUI ui;
+        public Light sun;
+
+        public bool inGame;
+        public int speed = 1;
+        public static readonly float[] SpeedHoursPerSec = { 0f, 4f, 12f, 36f, 96f };
+        float hourAccum;
+
+        public Tool tool = Tool.Select;
+        public RoomType roomType = RoomType.ServerHall;
+        public FacilityDef placeDef;
+        public int placeRot;
+        public readonly List<PlacedObject> selection = new List<PlacedObject>();
+        public Vector2Int hoverTile = new Vector2Int(-1, -1);
+        public PlacedObject hoverObject;
+        public bool dragging;
+        public Vector2Int dragStart;
+        public string toolHint;
+        public PlacedObject connectFrom;
+
+        public static string SavePath(int slot) => Path.Combine(Application.persistentDataPath, $"datacenter_slot{slot}.json");
+
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
+        static void AutoBoot()
+        {
+            if (FindAnyObjectByType<GameManager>() == null) new GameObject("GameManager").AddComponent<GameManager>();
+        }
+
+        void Awake()
+        {
+            if (I != null && I != this) { Destroy(gameObject); return; }
+            I = this;
+            Application.targetFrameRate = 120;
+            QualitySettings.shadowDistance = 90f;
+            SetupScene();
+        }
+
+        System.Collections.IEnumerator Start()
+        {
+            var args = System.Environment.GetCommandLineArgs();
+            int i = System.Array.IndexOf(args, "-shotdir");
+            if (i < 0 || i + 1 >= args.Length) yield break;
+            string dir = args[i + 1];
+            Directory.CreateDirectory(dir);
+            int days = 60;
+            int di = System.Array.IndexOf(args, "-shotdays");
+            if (di >= 0 && di + 1 < args.Length) int.TryParse(args[di + 1], out days);
+
+            yield return null;
+            ScreenCapture.CaptureScreenshot(Path.Combine(dir, "0_menu.png"));
+            yield return null; yield return null;
+
+            StartNewGame(20261117, "Normal");
+            AutoManager.BuildStarter(sim);
+            for (int d = 0; d < days; d++)
+            {
+                AutoManager.DailyManage(sim);
+                for (int h = 0; h < 24; h++) { sim.TickHour(); while (sim.popups.Count > 0) { var p = sim.popups.Dequeue(); p.options[0].Value?.Invoke(); } }
+            }
+            speed = 0;
+            var S = sim.S;
+            cam.SnapTo(new Vector3((S.ownX0 + S.ownX1) * 0.5f, 0, (S.ownY0 + S.ownY1) * 0.5f - 1f), 24f);
+            for (int k = 0; k < 10; k++) yield return null;
+            ScreenCapture.CaptureScreenshot(Path.Combine(dir, "1_overview.png"));
+            yield return null; yield return null;
+
+            var rack = sim.Racks.FirstOrDefault(r => r.devices.Count > 0);
+            if (rack != null)
+            {
+                selection.Clear(); selection.Add(rack);
+                cam.SnapTo(new Vector3(rack.x + 0.5f, 0, rack.y + 0.5f), 11f);
+            }
+            for (int k = 0; k < 10; k++) yield return null;
+            ScreenCapture.CaptureScreenshot(Path.Combine(dir, "2_rack.png"));
+            yield return null; yield return null;
+
+            selection.Clear();
+            ui.OpenWindow(GameUI.Window.Market);
+            cam.SnapTo(new Vector3((S.ownX0 + S.ownX1) * 0.5f, 0, (S.ownY0 + S.ownY1) * 0.5f), 24f);
+            for (int k = 0; k < 10; k++) yield return null;
+            ScreenCapture.CaptureScreenshot(Path.Combine(dir, "3_market.png"));
+            yield return null; yield return null;
+
+            ui.OpenWindow(GameUI.Window.Contracts);
+            view.heatOverlay = true;
+            for (int k = 0; k < 10; k++) yield return null;
+            ScreenCapture.CaptureScreenshot(Path.Combine(dir, "4_contracts_heat.png"));
+            yield return null; yield return null;
+
+            ui.OpenWindow(GameUI.Window.None);
+            for (int k = 0; k < 10; k++) yield return null;
+            ScreenCapture.CaptureScreenshot(Path.Combine(dir, "4b_heat.png"));
+            yield return null; yield return null;
+            view.heatOverlay = false;
+            BeginPlace(Catalog.Facility("rack_std"));
+            ui.ToggleBuildMenu();
+            for (int k = 0; k < 10; k++) yield return null;
+            ScreenCapture.CaptureScreenshot(Path.Combine(dir, "5_build.png"));
+            yield return null; yield return null; yield return null;
+            Application.Quit();
+        }
+
+        void SetupScene()
+        {
+            // Camera
+            var camGO = Camera.main != null ? Camera.main.gameObject : new GameObject("Main Camera", typeof(Camera));
+            camGO.tag = "MainCamera";
+            var c = camGO.GetComponent<Camera>();
+            c.clearFlags = CameraClearFlags.SolidColor;
+            c.backgroundColor = new Color(0.12f, 0.16f, 0.2f);
+            c.fieldOfView = 40f;
+            c.nearClipPlane = 0.3f;
+            c.farClipPlane = 400f;
+            c.allowMSAA = true;
+            cam = camGO.GetComponent<CameraController>();
+            if (cam == null) cam = camGO.AddComponent<CameraController>();
+
+            // Lighting
+            foreach (var l in FindObjectsByType<Light>()) if (l.type == LightType.Directional) Destroy(l.gameObject);
+            var sunGO = new GameObject("Sun");
+            sun = sunGO.AddComponent<Light>();
+            sun.type = LightType.Directional;
+            sun.intensity = 1.1f;
+            sun.color = new Color(1f, 0.96f, 0.9f);
+            sun.shadows = LightShadows.Soft;
+            sun.shadowStrength = 0.55f;
+            sunGO.transform.rotation = Quaternion.Euler(52f, -35f, 0f);
+            RenderSettings.ambientMode = UnityEngine.Rendering.AmbientMode.Trilight;
+            RenderSettings.ambientSkyColor = new Color(0.55f, 0.6f, 0.68f);
+            RenderSettings.ambientEquatorColor = new Color(0.42f, 0.44f, 0.46f);
+            RenderSettings.ambientGroundColor = new Color(0.25f, 0.25f, 0.25f);
+            RenderSettings.fog = false;
+
+            view = new GameObject("World").AddComponent<WorldView>();
+            ui = gameObject.AddComponent<GameUI>();
+            ui.gm = this;
+        }
+
+        // ================================================================ game lifecycle
+        public void StartNewGame(int seed, string difficulty)
+        {
+            LoadState(Simulation.NewGame(seed, difficulty));
+            var S = sim.S;
+            cam.SnapTo(new Vector3((S.ownX0 + S.ownX1) * 0.5f, 0, (S.ownY0 + S.ownY1) * 0.5f), 26f);
+            ui.showObjectives = true;
+            ui.OpenWindow(GameUI.Window.None);
+            speed = 1;
+        }
+
+        void LoadState(GameState s)
+        {
+            if (s.rooms == null || s.rooms.Length != s.mapW * s.mapH) s.rooms = new int[s.mapW * s.mapH];
+            if (s.obstacles == null || s.obstacles.Length != s.mapW * s.mapH) s.obstacles = new int[s.mapW * s.mapH];
+            // Sanitize: racks pointing to finished contracts.
+            foreach (var o in s.objects)
+                if (o.contractId > 0 && !s.contracts.Any(c => c.id == o.contractId && (c.status == ContractStatus.Setup || c.status == ContractStatus.Active)))
+                    o.contractId = -1;
+            sim = new Simulation(s);
+            sim.OnLog += (t, sev) => ui.Toast(t, sev);
+            if (view.sim == null) view.Init(sim); else view.ResetSim(sim);
+            cam.boundsMax = new Vector2(s.mapW, s.mapH);
+            selection.Clear();
+            SetTool(Tool.Select);
+            inGame = true;
+            hourAccum = 0;
+        }
+
+        public bool Save(int slot = 1)
+        {
+            if (sim == null) return false;
+            try
+            {
+                File.WriteAllText(SavePath(slot), JsonUtility.ToJson(sim.S));
+                ui.Toast($"Game saved (slot {slot}).", 1);
+                return true;
+            }
+            catch (System.Exception e) { ui.Toast("Save failed: " + e.Message, 3); return false; }
+        }
+
+        public bool Load(int slot = 1)
+        {
+            string p = SavePath(slot);
+            if (!File.Exists(p)) { ui.Toast("No save found.", 2); return false; }
+            try
+            {
+                var s = JsonUtility.FromJson<GameState>(File.ReadAllText(p));
+                LoadState(s);
+                cam.SnapTo(new Vector3((s.ownX0 + s.ownX1) * 0.5f, 0, (s.ownY0 + s.ownY1) * 0.5f), 26f);
+                ui.OpenWindow(GameUI.Window.None);
+                ui.Toast("Game loaded.", 1);
+                speed = 1;
+                return true;
+            }
+            catch (System.Exception e) { ui.Toast("Load failed: " + e.Message, 3); return false; }
+        }
+
+        public static bool HasSave(int slot = 1) => File.Exists(SavePath(slot));
+
+        // ================================================================ loop
+        void Update()
+        {
+            cam.inputEnabled = inGame && !ui.ModalOpen && !ui.textFocus;
+            cam.blockScroll = ui.IsPointerOverUI();
+            if (!inGame || sim == null) return;
+
+            bool paused = ui.ModalOpen || sim.popups.Count > 0 || sim.S.gameOver;
+            if (!paused && speed > 0)
+            {
+                hourAccum += Time.unscaledDeltaTime * SpeedHoursPerSec[speed];
+                int ticks = 0;
+                while (hourAccum >= 1f && ticks < 8)
+                {
+                    hourAccum -= 1f;
+                    sim.TickHour();
+                    ticks++;
+                    if (sim.popups.Count > 0) { hourAccum = 0; break; }
+                }
+                if (hourAccum > 8f) hourAccum = 0f;
+                if (sim.AutoSaveRequested) { sim.AutoSaveRequested = false; try { File.WriteAllText(SavePath(0), JsonUtility.ToJson(sim.S)); } catch { } }
+            }
+
+            HandleHotkeys();
+            HandleWorldInput();
+            selection.RemoveAll(o => !sim.objById.ContainsKey(o.id));
+            view.ShowSelection(selection, tool == Tool.Connect ? new Color(1f, 0.8f, 0.2f) : new Color(0.3f, 0.85f, 1f));
+            view.showGrid = tool != Tool.Select;
+        }
+
+        void HandleHotkeys()
+        {
+            if (ui.textFocus) return;
+            if (Input.GetKeyDown(KeyCode.Space)) speed = speed == 0 ? 1 : 0;
+            if (Input.GetKeyDown(KeyCode.Alpha1) || Input.GetKeyDown(KeyCode.Keypad1)) speed = 1;
+            if (Input.GetKeyDown(KeyCode.Alpha2) || Input.GetKeyDown(KeyCode.Keypad2)) speed = 2;
+            if (Input.GetKeyDown(KeyCode.Alpha3) || Input.GetKeyDown(KeyCode.Keypad3)) speed = 3;
+            if (Input.GetKeyDown(KeyCode.Alpha4) || Input.GetKeyDown(KeyCode.Keypad4)) speed = 4;
+            if (Input.GetKeyDown(KeyCode.R) && tool == Tool.Place) placeRot = (placeRot + 1) % 4;
+            if (Input.GetKeyDown(KeyCode.B)) ui.ToggleBuildMenu();
+            if (Input.GetKeyDown(KeyCode.F)) SetTool(Tool.Foundation);
+            if (Input.GetKeyDown(KeyCode.X) || Input.GetKeyDown(KeyCode.Delete)) { if (selection.Count > 0 && tool == Tool.Select) ui.ConfirmRemoveSelection(); else SetTool(Tool.Demolish); }
+            if (Input.GetKeyDown(KeyCode.C)) ui.ToggleWindow(GameUI.Window.Contracts);
+            if (Input.GetKeyDown(KeyCode.M)) ui.ToggleWindow(GameUI.Window.Market);
+            if (Input.GetKeyDown(KeyCode.T)) ui.ToggleWindow(GameUI.Window.Research);
+            if (Input.GetKeyDown(KeyCode.H)) view.heatOverlay = !view.heatOverlay;
+            if (Input.GetKeyDown(KeyCode.F5)) Save(1);
+            if (Input.GetKeyDown(KeyCode.F9)) Load(1);
+            if (Input.GetKeyDown(KeyCode.Escape))
+            {
+                if (tool != Tool.Select) SetTool(Tool.Select);
+                else if (ui.window != GameUI.Window.None) ui.OpenWindow(GameUI.Window.None);
+                else if (selection.Count > 0) selection.Clear();
+                else ui.OpenWindow(GameUI.Window.Menu);
+            }
+        }
+
+        public void SetTool(Tool t)
+        {
+            tool = t;
+            dragging = false;
+            view?.HideGhost();
+            view?.HideRect();
+            if (t != Tool.Place) placeDef = null;
+            if (t != Tool.Connect) connectFrom = null;
+        }
+
+        public void BeginPlace(FacilityDef d)
+        {
+            SetTool(Tool.Place);
+            placeDef = d;
+        }
+
+        public void BeginConnect(PlacedObject rack)
+        {
+            SetTool(Tool.Connect);
+            connectFrom = rack;
+        }
+
+        PlacedObject PickObject()
+        {
+            Ray r = Camera.main.ScreenPointToRay(Input.mousePosition);
+            PlacedObject best = null; float bestT = float.MaxValue;
+            foreach (var o in sim.S.objects)
+            {
+                var d = Catalog.Facility(o.def);
+                Simulation.Footprint(d, o.rot, out int w, out int h);
+                float height = d.kind == FacilityKind.Rack ? Models.RackHeight(d) : d.kind == FacilityKind.Desk ? 1.1f : 1.8f;
+                var b = new Bounds(new Vector3(o.x + w * 0.5f, height * 0.5f, o.y + h * 0.5f), new Vector3(w * 0.92f, height, h * 0.92f));
+                if (b.IntersectRay(r, out float t) && t < bestT) { bestT = t; best = o; }
+            }
+            return best;
+        }
+
+        void HandleWorldInput()
+        {
+            toolHint = null;
+            bool overUI = ui.IsPointerOverUI() || ui.ModalOpen;
+            hoverObject = null;
+            if (overUI)
+            {
+                if (!dragging) { view.HideGhost(); }
+                return;
+            }
+            if (!cam.MouseGround(out var gp)) return;
+            var tile = new Vector2Int(Mathf.FloorToInt(gp.x), Mathf.FloorToInt(gp.z));
+            hoverTile = tile;
+            hoverObject = PickObject();
+
+            if (Input.GetMouseButtonDown(1))
+            {
+                if (tool != Tool.Select) { SetTool(Tool.Select); return; }
+                selection.Clear();
+            }
+
+            switch (tool)
+            {
+                case Tool.Select:
+                    if (Input.GetMouseButtonDown(0))
+                    {
+                        var o = hoverObject ?? sim.ObjectAt(tile.x, tile.y);
+                        bool add = Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift) || Input.GetKey(KeyCode.LeftControl);
+                        if (o == null) { if (!add) selection.Clear(); dragging = true; dragStart = tile; }
+                        else if (add) { if (selection.Contains(o)) selection.Remove(o); else selection.Add(o); }
+                        else { selection.Clear(); selection.Add(o); }
+                    }
+                    if (dragging)
+                    {
+                        var rect = Simulation.Normalize(dragStart, tile);
+                        if (rect.width * rect.height > 1) view.ShowRect(rect, new Color(0.3f, 0.8f, 1f, 0.15f));
+                        if (Input.GetMouseButtonUp(0))
+                        {
+                            dragging = false;
+                            view.HideRect();
+                            if (rect.width * rect.height > 1)
+                            {
+                                // Box-select racks (or everything if no racks in the box).
+                                var inBox = sim.S.objects.Where(o => rect.Contains(new Vector2Int(o.x, o.y))).ToList();
+                                var rackSel = inBox.Where(o => Catalog.Facility(o.def).kind == FacilityKind.Rack).ToList();
+                                foreach (var o in (rackSel.Count > 0 ? rackSel : inBox)) if (!selection.Contains(o)) selection.Add(o);
+                            }
+                        }
+                    }
+                    break;
+
+                case Tool.Place:
+                {
+                    if (placeDef == null) { SetTool(Tool.Select); break; }
+                    Simulation.Footprint(placeDef, placeRot, out int w, out int h);
+                    int ax = tile.x - (w - 1) / 2, ay = tile.y - (h - 1) / 2;
+                    string err = sim.CanPlace(placeDef, ax, ay, placeRot);
+                    view.ShowGhost(placeDef, ax, ay, placeRot, err == null);
+                    toolHint = err == null ? $"{placeDef.name}  ${placeDef.cost:N0}   [R] rotate  [RMB] cancel" : err;
+                    if (Input.GetMouseButtonDown(0) && err == null)
+                    {
+                        var o = sim.Place(placeDef, ax, ay, placeRot);
+                        if (o != null && placeDef.kind == FacilityKind.Rack && ui.autoConnectNewRacks) sim.AutoConnect(o);
+                    }
+                    break;
+                }
+
+                case Tool.Foundation:
+                case Tool.Room:
+                case Tool.Demolish:
+                {
+                    if (Input.GetMouseButtonDown(0)) { dragging = true; dragStart = tile; }
+                    var rect = dragging ? Simulation.Normalize(dragStart, tile) : new RectInt(tile.x, tile.y, 1, 1);
+                    float cost; int n; string what = null;
+                    Color col;
+                    if (tool == Tool.Foundation) { n = sim.BuildFoundation(rect, false, out cost); col = new Color(0.9f, 0.9f, 0.9f, 0.3f); what = $"Build {n} foundation tile(s)"; }
+                    else if (tool == Tool.Room) { n = sim.PaintRoom(rect, roomType, false, out cost); col = Catalog.RoomColor(roomType); col.a = 0.45f; what = $"Paint {n} tile(s) as {Catalog.RoomName(roomType)}"; }
+                    else { n = sim.Demolish(rect, false, out cost, out what); col = new Color(1f, 0.25f, 0.2f, 0.3f); }
+                    view.ShowRect(rect, col);
+                    toolHint = n > 0 ? $"{what}   {(cost >= 0 ? "Cost" : "Refund")}: ${Mathf.Abs(cost):N0}" : (tool == Tool.Room ? "Paint over existing building foundation" : tool == Tool.Foundation ? "Drag on owned, clear land" : "Nothing to demolish here");
+                    if (dragging && Input.GetMouseButtonUp(0))
+                    {
+                        dragging = false;
+                        if (tool == Tool.Foundation) sim.BuildFoundation(rect, true, out _);
+                        else if (tool == Tool.Room) sim.PaintRoom(rect, roomType, true, out _);
+                        else sim.Demolish(rect, true, out _, out _);
+                    }
+                    break;
+                }
+
+                case Tool.Connect:
+                {
+                    if (connectFrom == null || !sim.objById.ContainsKey(connectFrom.id)) { SetTool(Tool.Select); break; }
+                    var target = hoverObject;
+                    bool isCore = target != null && Catalog.Facility(target.def).kind == FacilityKind.CoreSwitch;
+                    toolHint = isCore ? $"Cable to Core #{target.id}: ${sim.CableCost(connectFrom, target):N0}  ({sim.FreePorts(target)} free ports)" : "Click a core switch to run a cable";
+                    if (Input.GetMouseButtonDown(0) && isCore)
+                    {
+                        var targets = selection.Where(o => Catalog.Facility(o.def).kind == FacilityKind.Rack).ToList();
+                        if (!targets.Contains(connectFrom)) targets.Add(connectFrom);
+                        foreach (var rack in targets)
+                        {
+                            if (rack.linkCore == target.id) continue;
+                            string err = sim.Connect(rack, target);
+                            if (err != null) { ui.Toast(err, 2); break; }
+                        }
+                        SetTool(Tool.Select);
+                    }
+                    break;
+                }
+            }
+        }
+    }
+}
