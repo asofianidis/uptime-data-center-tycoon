@@ -2,6 +2,8 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using UnityEngine;
+using UnityEngine.Rendering;
+using UnityEngine.Rendering.Universal;
 
 namespace DCT
 {
@@ -35,6 +37,11 @@ namespace DCT
         public static readonly int[] FpsCaps = { 30, 60, 75, 120, 144, 165, 240, 0 };
         public static readonly int[] MsaaLevels = { 0, 2, 4, 8 };
         public static readonly string[] ShadowNames = { "Off", "Hard", "Soft" };
+        /// <summary>Default shadow mode adopted when picking each quality preset (Very Low .. Ultra).</summary>
+        public static readonly int[] PresetShadows = { 0, 0, 1, 2, 2, 2 };
+
+        /// <summary>Shadow type the directional sun light should use for the current setting.</summary>
+        public static LightShadows SunShadows => Shadows == 0 ? LightShadows.None : Shadows == 1 ? LightShadows.Hard : LightShadows.Soft;
 
         public static readonly List<KeyValuePair<string, KeyCode>> Defaults = new List<KeyValuePair<string, KeyCode>>
         {
@@ -209,9 +216,17 @@ namespace DCT
                 QualitySettings.SetQualityLevel(Quality, true);
             QualitySettings.vSyncCount = VSync ? 1 : 0;
             Application.targetFrameRate = VSync || FpsCap <= 0 ? -1 : FpsCap;
-            QualitySettings.antiAliasing = MsaaLevels.Contains(Msaa) ? Msaa : 0;
-            QualitySettings.shadows = Shadows == 0 ? ShadowQuality.Disable : Shadows == 1 ? ShadowQuality.HardOnly : ShadowQuality.All;
-            QualitySettings.shadowDistance = 90f;
+            // URP reads MSAA and shadow distance from the active pipeline asset, not QualitySettings.
+            var urp = ActivePipeline();
+            if (urp != null)
+            {
+                Remember(urp);
+                urp.msaaSampleCount = MsaaLevels.Contains(Msaa) && Msaa > 1 ? Msaa : 1;
+                urp.shadowDistance = 90f;
+            }
+            // Shadow on/hard/soft is a per-light setting under URP.
+            foreach (var l in UnityEngine.Object.FindObjectsByType<Light>())
+                if (l.type == LightType.Directional) l.shadows = SunShadows;
         }
 
         /// <summary>Selects a quality preset and adopts its anti-aliasing / shadow defaults.</summary>
@@ -219,10 +234,37 @@ namespace DCT
         {
             Quality = Mathf.Clamp(level, 0, QualitySettings.names.Length - 1);
             QualitySettings.SetQualityLevel(Quality, true);
-            Msaa = QualitySettings.antiAliasing;
-            Shadows = QualitySettings.shadows == ShadowQuality.Disable ? 0 : QualitySettings.shadows == ShadowQuality.HardOnly ? 1 : 2;
+            var urp = ActivePipeline();
+            int presetMsaa = urp == null ? 0 : originals.TryGetValue(urp, out var o) ? o.msaa : urp.msaaSampleCount;
+            Msaa = presetMsaa > 1 ? presetMsaa : 0;
+            Shadows = PresetShadows[Mathf.Clamp(Quality, 0, PresetShadows.Length - 1)];
             ApplyGraphics();
             Save();
+        }
+
+        static UniversalRenderPipelineAsset ActivePipeline() =>
+            (QualitySettings.renderPipeline != null ? QualitySettings.renderPipeline : GraphicsSettings.defaultRenderPipeline) as UniversalRenderPipelineAsset;
+
+        // Original values of pipeline assets changed at runtime, so editor play sessions don't leave the
+        // project's assets modified.
+        static readonly Dictionary<UniversalRenderPipelineAsset, (int msaa, float shadowDistance)> originals =
+            new Dictionary<UniversalRenderPipelineAsset, (int, float)>();
+
+        static void Remember(UniversalRenderPipelineAsset a)
+        {
+            if (originals.ContainsKey(a)) return;
+#if UNITY_EDITOR
+            if (originals.Count == 0) Application.quitting += RestorePipelines;
+#endif
+            originals[a] = (a.msaaSampleCount, a.shadowDistance);
+        }
+
+        static void RestorePipelines()
+        {
+            foreach (var kv in originals)
+                if (kv.Key != null) { kv.Key.msaaSampleCount = kv.Value.msaa; kv.Key.shadowDistance = kv.Value.shadowDistance; }
+            originals.Clear();
+            Application.quitting -= RestorePipelines;
         }
 
         public static string ResName(int w, int h) { var r = EffectiveResolution(w, h); return $"{r.x} x {r.y}" + (w <= 0 ? " (native)" : ""); }

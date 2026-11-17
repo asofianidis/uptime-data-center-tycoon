@@ -62,6 +62,74 @@ namespace DCT.EditorTools
             Debug.Log("[Uptime] Scene set up at " + ScenePath);
         }
 
+        // One URP asset per quality level, mirroring the old built-in pipeline quality presets.
+        static readonly (string name, int msaa, int shadowRes, int cascades)[] PipelineLevels =
+        {
+            ("VeryLow", 1, 512, 1),
+            ("Low", 1, 1024, 1),
+            ("Medium", 1, 1024, 1),
+            ("High", 1, 2048, 2),
+            ("VeryHigh", 2, 2048, 2),
+            ("Ultra", 2, 4096, 4),
+        };
+
+        /// <summary>Creates the URP renderer and per-quality-level pipeline assets and assigns them in Graphics/Quality settings.</summary>
+        [MenuItem("Uptime/Setup Render Pipeline")]
+        public static void SetupRenderPipeline()
+        {
+            const string dir = "Assets/Settings/Rendering";
+            Directory.CreateDirectory(dir);
+            AssetDatabase.Refresh();
+
+            string rendererPath = dir + "/Uptime_Renderer.asset";
+            var renderer = AssetDatabase.LoadAssetAtPath<UnityEngine.Rendering.Universal.UniversalRendererData>(rendererPath);
+            if (renderer == null)
+            {
+                renderer = ScriptableObject.CreateInstance<UnityEngine.Rendering.Universal.UniversalRendererData>();
+                AssetDatabase.CreateAsset(renderer, rendererPath);
+            }
+            renderer.renderingMode = UnityEngine.Rendering.Universal.RenderingMode.Forward;
+            EditorUtility.SetDirty(renderer);
+
+            var assets = new UnityEngine.Rendering.Universal.UniversalRenderPipelineAsset[PipelineLevels.Length];
+            for (int i = 0; i < PipelineLevels.Length; i++)
+            {
+                var lv = PipelineLevels[i];
+                string path = $"{dir}/Uptime_URP_{lv.name}.asset";
+                var a = AssetDatabase.LoadAssetAtPath<UnityEngine.Rendering.Universal.UniversalRenderPipelineAsset>(path);
+                if (a == null)
+                {
+                    a = UnityEngine.Rendering.Universal.UniversalRenderPipelineAsset.Create(renderer);
+                    AssetDatabase.CreateAsset(a, path);
+                }
+                var so = new SerializedObject(a);
+                so.FindProperty("m_SupportsHDR").boolValue = false;
+                so.FindProperty("m_MSAA").intValue = lv.msaa;
+                so.FindProperty("m_MainLightRenderingMode").intValue = (int)UnityEngine.Rendering.Universal.LightRenderingMode.PerPixel;
+                so.FindProperty("m_MainLightShadowsSupported").boolValue = true;
+                so.FindProperty("m_MainLightShadowmapResolution").intValue = lv.shadowRes;
+                so.FindProperty("m_AdditionalLightsRenderingMode").intValue = (int)UnityEngine.Rendering.Universal.LightRenderingMode.PerPixel;
+                so.FindProperty("m_AdditionalLightShadowsSupported").boolValue = false;
+                so.FindProperty("m_SoftShadowsSupported").boolValue = true;
+                so.FindProperty("m_ShadowDistance").floatValue = 90f;
+                so.FindProperty("m_ShadowCascadeCount").intValue = lv.cascades;
+                so.ApplyModifiedPropertiesWithoutUndo();
+                EditorUtility.SetDirty(a);
+                assets[i] = a;
+            }
+
+            int current = QualitySettings.GetQualityLevel();
+            for (int i = 0; i < QualitySettings.names.Length; i++)
+            {
+                QualitySettings.SetQualityLevel(i, false);
+                QualitySettings.renderPipeline = assets[Mathf.Min(i, assets.Length - 1)];
+            }
+            QualitySettings.SetQualityLevel(current, false);
+            UnityEngine.Rendering.GraphicsSettings.defaultRenderPipeline = assets[3];
+            AssetDatabase.SaveAssets();
+            Debug.Log($"[Uptime] URP set up: {assets.Length} pipeline assets, default {assets[3].name}");
+        }
+
         [MenuItem("Uptime/Build Windows Player")]
         public static void BuildWindows()
         {

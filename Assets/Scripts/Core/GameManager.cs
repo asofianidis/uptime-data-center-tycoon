@@ -249,7 +249,7 @@ namespace DCT
             sun.type = LightType.Directional;
             sun.intensity = 1.1f;
             sun.color = new Color(1f, 0.96f, 0.9f);
-            sun.shadows = LightShadows.Soft;
+            sun.shadows = Settings.SunShadows;
             sun.shadowStrength = 0.55f;
             sunGO.transform.rotation = Quaternion.Euler(52f, -35f, 0f);
             RenderSettings.ambientMode = UnityEngine.Rendering.AmbientMode.Trilight;
