@@ -4,9 +4,9 @@ using UnityEngine;
 
 namespace DCT
 {
-    public class GameUI : MonoBehaviour
+    public partial class GameUI : MonoBehaviour
     {
-        public enum Window { None, Market, Contracts, Research, Finance, Staff, Log, Menu, Help }
+        public enum Window { None, Market, Contracts, Research, Finance, Staff, Log, Menu, Help, Goals, Dashboard, Settings, SaveLoad, Achievements }
 
         public GameManager gm;
         public Window window;
@@ -24,6 +24,7 @@ namespace DCT
         List<Rect> lastRects = new List<Rect>();
 
         bool buildMenuOpen;
+        bool showAllAssign;
         int buildTab;
         bool roomMenuOpen;
         int contractsTab;
@@ -85,7 +86,7 @@ namespace DCT
         }
 
         // ---------------------------------------------------------------- public API
-        public bool ModalOpen => !gm.inGame || window == Window.Menu || window == Window.Help || (gm.sim != null && gm.sim.popups.Count > 0) || confirmAction != null;
+        public bool ModalOpen => !gm.inGame || window == Window.Menu || window == Window.Help || window == Window.Settings || window == Window.SaveLoad || window == Window.Achievements || (gm.sim != null && gm.sim.popups.Count > 0) || confirmAction != null;
 
         public bool IsPointerOverUI()
         {
@@ -125,20 +126,24 @@ namespace DCT
         void OnGUI()
         {
             EnsureStyles();
-            scale = Mathf.Max(0.75f, Screen.height / 900f);
+            scale = Mathf.Max(0.6f, Screen.height / 900f * Settings.UiScale);
             GUI.matrix = Matrix4x4.TRS(Vector3.zero, Quaternion.identity, new Vector3(scale, scale, 1));
             if (Event.current.type == EventType.Layout) curRects.Clear();
-            textFocus = GUIUtility.keyboardControl != 0 && newGamePanel;
+            textFocus = GUIUtility.keyboardControl != 0 || rebinding != null;
+            HandleRebind();
 
             if (!gm.inGame)
             {
                 DrawMainMenu();
+                DrawSharedWindows();
+                DrawConfirm();
             }
             else
             {
                 DrawWorldLabels();
                 DrawTopBar();
-                DrawToolbar();
+                DrawToolbar2();
+                DrawOverlayLegend();
                 if (buildMenuOpen) DrawBuildMenu();
                 if (roomMenuOpen) DrawRoomMenu();
                 DrawInspector();
@@ -226,19 +231,21 @@ namespace DCT
             GUI.Label(new Rect(0, VH * 0.12f, VW, 60), "UPTIME", title);
             GUI.Label(new Rect(0, VH * 0.12f + 58, VW, 30), "D A T A   C E N T E R   T Y C O O N", new GUIStyle(lblCenter) { fontSize = 18, normal = { textColor = new Color(0.5f, 0.8f, 1f) } });
 
-            if (!newGamePanel)
+            if (window == Window.Settings || window == Window.SaveLoad || window == Window.Achievements) { }
+            else if (!newGamePanel)
             {
                 float w = 320, x = (VW - w) / 2, y = VH * 0.42f;
                 GUILayout.BeginArea(new Rect(x, y, w, 300));
                 if (Button("New Game", true, GUILayout.Height(42))) { newGamePanel = true; seedText = Random.Range(100000, 999999).ToString(); }
-                if (GameManager.HasSave(1) && Button("Continue (Slot 1)", true, GUILayout.Height(42))) gm.Load(1);
-                if (GameManager.HasSave(0) && Button("Load Autosave", true, GUILayout.Height(42))) gm.Load(0);
+                if (Button("Load Game", GameManager.HasSave(1) || GameManager.HasSave(2) || GameManager.HasSave(3) || GameManager.HasSave(0), GUILayout.Height(42))) OpenWindow(Window.SaveLoad);
+                if (Button("Achievements", true, GUILayout.Height(42))) OpenWindow(Window.Achievements);
+                if (Button("Settings", true, GUILayout.Height(42))) OpenWindow(Window.Settings);
                 if (Button("Quit", true, GUILayout.Height(42))) Application.Quit();
                 GUILayout.EndArea();
             }
             else
             {
-                float w = 560, h = 430, x = (VW - w) / 2, y = VH * 0.3f;
+                float w = 600, h = 560, x = (VW - w) / 2, y = Mathf.Max(10, VH * 0.24f);
                 GUILayout.BeginArea(new Rect(x, y, w, h), panel);
                 GUILayout.Label("New Data Center", header);
                 GUILayout.Space(6);
@@ -266,11 +273,13 @@ namespace DCT
                 GUILayout.Label($"Disaster risk: x{city.disasterRate:0.00}    Market demand: x{city.demandFactor:0.00}", lbl);
                 GUILayout.Label(city.blurb, lblDim);
                 GUILayout.EndVertical();
+                GUILayout.Space(6);
+                ScenarioPicker();
                 GUILayout.FlexibleSpace();
                 GUILayout.BeginHorizontal();
                 if (Button("Back", true, GUILayout.Height(36), GUILayout.Width(120))) newGamePanel = false;
                 GUILayout.FlexibleSpace();
-                if (Button("Start", true, GUILayout.Height(36), GUILayout.Width(200))) { newGamePanel = false; GUIUtility.keyboardControl = 0; gm.StartNewGame(seed, difficulty); }
+                if (Button("Start", true, GUILayout.Height(36), GUILayout.Width(200))) { newGamePanel = false; GUIUtility.keyboardControl = 0; gm.StartNewGame(seed, difficulty, scenarioId); }
                 GUILayout.EndHorizontal();
                 GUILayout.EndArea();
             }
@@ -310,7 +319,9 @@ namespace DCT
             Stat("Hot", Sim.zones.Count > 0 ? $"{maxT:0.0}C" : "-", maxT > 35 ? 2 : maxT > 29 ? 1 : 0, 80);
             Stat("WAN", $"{Sim.bwDemand:0.#}/{Sim.ispGbps:0} G", Sim.netQuality < 1 ? 2 : Sim.bwDemand > Sim.ispGbps * 0.8f ? 1 : 0, 120);
             Stat("Ports", $"{Sim.corePortsUsed}/{Sim.corePorts}", Sim.corePorts > 0 && Sim.corePortsUsed >= Sim.corePorts ? 1 : 0, 90);
-            Stat("Techs", $"{Sim.EffectiveTechs}", 0, 70);
+            Stat("Staff", $"{Sim.WorkingStaffCount}", S.staff.Count > Sim.deskCount ? 1 : 0, 64);
+            Stat(S.weather, Sim.solarCapKW > 0 ? $"sun {Sim.solarKW:0}kW" : "", S.weather == "Storm" ? 2 : 0, 110);
+            Stat("$/kWh", $"{Sim.PowerPriceNow + S.city.carbonTax:0.000}", Sim.TimeOfDayPriceMul > 1f ? 1 : 0, 96);
 
             foreach (var e in S.events)
                 GUILayout.Label($"{e.label} {HoursToText(e.endHour - S.hour)}", chip);
@@ -479,7 +490,7 @@ namespace DCT
             if (text == null) return;
             var mp = new Vector2(Input.mousePosition.x / scale, (Screen.height - Input.mousePosition.y) / scale);
             var size = tooltipStyle.CalcSize(new GUIContent(text));
-            size.x = Mathf.Min(size.x, 420);
+            size.x = Mathf.Min(size.x + 16, 440);
             float h = tooltipStyle.CalcHeight(new GUIContent(text), size.x);
             var r = new Rect(mp.x + 18, mp.y + 18, size.x, h);
             if (r.xMax > VW) r.x = mp.x - size.x - 10;
@@ -513,6 +524,7 @@ namespace DCT
         void DrawObjectives()
         {
             var steps = new List<(string, bool)>();
+            var keys = new List<string> { "Foundation", "Rooms", "Equipment", "Equipment", "Equipment", null, "Market", "Contracts", "Staff" };
             bool Has(FacilityKind k) => S.objects.Any(o => Catalog.Facility(o.def).kind == k);
             bool HasRoom(RoomType t) => S.rooms.Any(v => v == (int)t);
             steps.Add(("Build a foundation [F] (drag on clear land)", S.rooms.Any(v => v != 0)));
@@ -523,11 +535,11 @@ namespace DCT
             steps.Add(("Select the rack: add a ToR switch + servers, cable it to the core", Sim.racks.Values.Any(i => i.online)));
             steps.Add(("Accept a contract in the Market [M] and assign racks to it", S.contracts.Any() && S.objects.Any(o => o.contractId > 0)));
             steps.Add(("Bring a contract online", S.contracts.Any(c => c.status == ContractStatus.Active || c.status == ContractStatus.Completed)));
-            steps.Add(("Build an Office and hire a technician (Staff & Land)", S.technicians > 0));
+            steps.Add(("Build an Office with desks, then hire staff (Staff & Land)", S.staff.Count > 0));
             if (steps.All(s => s.Item2)) { steps.Clear(); steps.Add(("All set! Grow your reputation and research new hardware.", true)); }
 
             float h = 34 + steps.Count * 21;
-            var r = Reg(new Rect(6, 618, 330, h));
+            var r = Reg(new Rect(6, 708, 330, h));
             if (r.yMax > VH - 6) r.y = VH - 6 - h;
             GUILayout.BeginArea(r, panel);
             GUILayout.BeginHorizontal();
@@ -536,8 +548,11 @@ namespace DCT
             if (GUILayout.Button("x", btnSmall)) showObjectives = false;
             GUILayout.EndHorizontal();
             bool firstOpen = true;
-            foreach (var (text, done) in steps)
+            tutorialHighlight = null;
+            for (int si = 0; si < steps.Count; si++)
             {
+                var (text, done) = steps[si];
+                if (!done && firstOpen && si < keys.Count) tutorialHighlight = keys[si];
                 var st = done ? lblDim : firstOpen ? lblWarn : lblSmall;
                 if (!done) firstOpen = false;
                 GUILayout.Label((done ? "[x] " : "[ ] ") + text, new GUIStyle(st) { wordWrap = false, fontSize = 11 });
@@ -583,7 +598,7 @@ namespace DCT
             GUILayout.Space(4);
             if (o.failed)
             {
-                GUILayout.Label("BROKEN - " + (Sim.EffectiveTechs > 0 ? $"technicians repairing ({o.repairLeft}h left when assigned)" : "no technicians available"), lblBad);
+                GUILayout.Label("BROKEN - " + (Sim.EffectiveTechs > 0 ? "staff will walk over and repair it" : "no staff available"), lblBad);
                 float cost = Sim.ManualRepairCost(o, null);
                 if (Button($"Emergency repair now ({Money(cost)})", S.money >= cost)) Sim.ManualRepair(o, null);
             }
@@ -643,6 +658,7 @@ namespace DCT
                     if (Button("Open Staff & Land")) OpenWindow(Window.Staff);
                     break;
             }
+            FacilityExtras(o, d);
             GUILayout.Space(10);
             if (Button($"Remove (refund {Money(Sim.RemovalRefund(o))})")) ConfirmRemoveSelection();
         }
@@ -664,6 +680,7 @@ namespace DCT
             GUILayout.Label($"Servers: {info.activeServers} active / {info.servers}   Ports: {info.ports}", lbl);
             GUILayout.Label($"Cores: {info.cores}   Storage: {info.storage:0} TB   GPUs: {info.gpus}", lbl);
             if (info.zone >= 0) GUILayout.Label($"Hall temp: {Sim.zones[info.zone].temp:0.0} C", Sim.zones[info.zone].temp > 32 ? lblBad : lbl);
+            RackExtras(o, info);
 
             // Network
             GUILayout.Space(8);
@@ -716,7 +733,8 @@ namespace DCT
                 var dd = Catalog.Device(dev.def);
                 GUILayout.BeginHorizontal(panelDark);
                 Swatch(dev.failed ? Color.red : dd.color, 10);
-                GUILayout.Label($"U{dev.u + 1:00}  {dd.name}", dev.failed ? lblBad : lblSmall, GUILayout.Width(220));
+                GUILayout.Label($"U{dev.u + 1:00}  {dd.name}", dev.failed ? lblBad : lblSmall, GUILayout.Width(170));
+                DeviceRowExtras(o, dev);
                 GUILayout.FlexibleSpace();
                 if (dev.failed)
                 {
@@ -727,6 +745,7 @@ namespace DCT
                 GUILayout.EndHorizontal();
             }
 
+            TemplatesSection(new List<PlacedObject> { o });
             GUILayout.Space(8);
             GUILayout.Label("INSTALL HARDWARE", lblDim);
             DeviceShop(new List<PlacedObject> { o });
@@ -740,8 +759,13 @@ namespace DCT
             var open = S.contracts.Where(c => c.status == ContractStatus.Setup || c.status == ContractStatus.Active).ToList();
             if (open.Count == 0) { GUILayout.Label("No contracts yet - accept one in the Market [M].", lblDim); return; }
             GUILayout.Label("Assign to contract:", lblSmall);
+            // Show contracts still being set up or short on capacity first; collapse the rest.
+            open = open.OrderBy(c => c.status == ContractStatus.Setup ? 0 : !c.meeting ? 1 : 2).ToList();
+            int shown = 0;
             foreach (var c in open)
             {
+                if (!showAllAssign && shown >= 5) { if (SmallButton($"Show all {open.Count} contracts...")) showAllAssign = true; break; }
+                shown++;
                 GUILayout.BeginHorizontal();
                 Swatch(Catalog.CustomerColors[c.colorIdx]);
                 int count = Sim.Racks.Count(x => x.contractId == c.id);
@@ -847,6 +871,11 @@ namespace DCT
                 }
             }
             GUILayout.Space(6);
+            TemplatesSection(racks);
+            GUILayout.BeginHorizontal();
+            if (SmallButton("Make all redundant")) foreach (var r in racks) { var e = Sim.MakeRedundant(r); if (e != null) { Toast(e, 2); break; } }
+            if (SmallButton("Rotate all")) foreach (var r in racks) { Sim.RotateRack(r); gm.view.ForceRebuildObject(r.id); }
+            GUILayout.EndHorizontal();
             GUILayout.Label("INSTALL IN EACH RACK", lblDim);
             DeviceShop(racks);
             GUILayout.Space(8);
@@ -859,6 +888,7 @@ namespace DCT
             if (window == Window.None) return;
             if (window == Window.Menu) { DrawMenu(); return; }
             if (window == Window.Help) { DrawHelp(); return; }
+            if (DrawSharedWindows()) return;
             float w = Mathf.Min(860, VW - 600), h = Mathf.Min(640, VH - 80);
             w = Mathf.Max(w, 640);
             var r = Reg(new Rect(182, 52, w, h));
@@ -871,6 +901,8 @@ namespace DCT
                 Window.Research => "Research & Unlocks",
                 Window.Finance => "Finance",
                 Window.Staff => "Staff & Land",
+                Window.Goals => "Goals & Achievements",
+                Window.Dashboard => "Dashboard",
                 Window.Log => "Event Log",
                 _ => ""
             }, header);
@@ -883,7 +915,9 @@ namespace DCT
                 case Window.Contracts: ContractsWindow(); break;
                 case Window.Research: ResearchWindow(); break;
                 case Window.Finance: FinanceWindow(); break;
-                case Window.Staff: StaffWindow(); break;
+                case Window.Staff: StaffWindow2(); break;
+                case Window.Goals: GoalsWindow(); break;
+                case Window.Dashboard: DashboardWindow(); break;
                 case Window.Log: LogWindow(); break;
             }
             GUILayout.EndArea();
@@ -961,6 +995,7 @@ namespace DCT
         void MarketWindow()
         {
             GUILayout.Label($"Offers refresh over time. Better reputation brings more and better-paying customers. Reputation level {S.Level}, rating {S.rating:0}/100.", lblDim);
+            RivalsStrip();
             scrollWin = GUILayout.BeginScrollView(scrollWin);
             if (S.offers.Count == 0) GUILayout.Label("No offers right now. New customers will call soon.", lblDim);
             foreach (var c in S.offers.ToList())
@@ -976,6 +1011,7 @@ namespace DCT
                 GUILayout.BeginHorizontal();
                 GUILayout.Label($"Offer expires in {HoursToText(c.expiresHour - S.hour)}", lblDim);
                 GUILayout.FlexibleSpace();
+                NegotiateButtons(c);
                 if (Button("Decline", true, GUILayout.Width(90))) Sim.DeclineOffer(c);
                 if (Button("Accept contract", true, GUILayout.Width(160))) Sim.AcceptOffer(c);
                 GUILayout.EndHorizontal();
@@ -1036,6 +1072,7 @@ namespace DCT
                     case ContractType.GpuCloud: ReqBar("GPUs", p.gpus, c.reqGpus, "GPUs"); break;
                 }
                 ReqBar("Bandwidth", p.bandwidth, c.reqBandwidth, "Gbps");
+                SatisfactionBar(c);
 
                 if (c.status == ContractStatus.Setup)
                     GUILayout.Label($"SETTING UP - deadline in {HoursToText(c.deadlineHour - S.hour)}. Goes live automatically once requirements are met.", lblWarn);
@@ -1230,14 +1267,15 @@ namespace DCT
         void DrawMenu()
         {
             DimBackground();
-            float w = 320, h = 360;
+            float w = 320, h = 440;
             var r = Reg(new Rect((VW - w) / 2, (VH - h) / 2, w, h));
             GUILayout.BeginArea(r, panel);
             GUILayout.Label("Paused", new GUIStyle(header) { alignment = TextAnchor.MiddleCenter });
             GUILayout.Space(8);
             if (Button("Resume", true, GUILayout.Height(36))) OpenWindow(Window.None);
             if (Button("Save game  [F5]", true, GUILayout.Height(36))) { gm.Save(1); OpenWindow(Window.None); }
-            if (Button("Load game  [F9]", GameManager.HasSave(1), GUILayout.Height(36))) gm.Load(1);
+            if (Button("Save / Load slots", true, GUILayout.Height(36))) OpenWindow(Window.SaveLoad);
+            if (Button("Settings", true, GUILayout.Height(36))) OpenWindow(Window.Settings);
             if (Button("How to play", true, GUILayout.Height(36))) OpenWindow(Window.Help);
             if (Button("Main menu", true, GUILayout.Height(36))) Confirm("Return to the main menu? Unsaved progress will be lost.", () => { gm.inGame = false; window = Window.None; gm.selection.Clear(); });
             if (Button("Quit", true, GUILayout.Height(36))) Application.Quit();
@@ -1307,9 +1345,34 @@ Without technicians you must pay for emergency repairs from the inspector.
 PROGRESSION
 Completing contract months earns XP. Higher reputation levels unlock research for new servers, switches, racks, cooling and power.
 
+HOT & COLD AISLES
+A rack's intake is its front (the side with the hardware faceplates). Face rows front-to-front across a 1-tile cold aisle and back-to-back across hot aisles for a heat bonus. A rack breathing another rack's exhaust runs hotter. Use the Airflow overlay [O].
+
+REDUNDANCY
+Redundant contracts pay ~35% more but every rack needs a dual PDU, two ToR switches, and uplinks to two different core switches. Redundant racks keep running when one PDU trips or one core switch fails.
+
+STAFF
+Hire Technicians (servers, tickets), Electricians (power, cooling, PDUs), Network Engineers (network gear, tickets) and Security (stops DDoS attacks and break-ins). Staff physically walk to jobs, so keep aisles clear and the office close to the halls.
+
+CUSTOMERS
+Support tickets appear for active contracts. Resolve them (staff or paid contractor) to keep satisfaction up. Happy customers renew and refer new customers; unhappy ones get poached by rival data centers. In the Market you can negotiate once per offer.
+
+ENERGY
+Grid power is cheapest at night and most expensive 17:00-21:00. Solar arrays cut your bill and carbon tax; eco customers want 25%+ solar.
+
+HARDWARE AGE
+Hardware fails more often after ~1.5 years and resells for less. Refresh old devices from the rack inspector (Age overlay helps).
+
+EVENTS
+Fires (install Fire Suppression in every hall), coolant leaks, DDoS, chip shortages, price wars, bankruptcies, break-ins, storms and new carbon levies keep things interesting.
+
+GOALS
+Pick a scenario at New Game for a specific challenge, earn achievements, and take your company public once you're big enough.
+
 TIME
 Space: pause    1-4: game speed    F5: quick save    F9: quick load    Esc: cancel / menu
-Shift+click or drag a box in Select mode to select multiple racks for bulk actions.";
+Shift+click or drag a box in Select mode to select multiple racks for bulk actions.
+Ctrl+Z: undo the last build action. O: cycle overlays. All keys can be rebound in Settings.";
 
         // ---------------------------------------------------------------- popups
         void DrawPopups()

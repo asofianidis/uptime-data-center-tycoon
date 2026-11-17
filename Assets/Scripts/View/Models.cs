@@ -22,6 +22,8 @@ namespace DCT
                 case FacilityKind.Ups: return Ups(mb, d);
                 case FacilityKind.Generator: return Generator(mb, d);
                 case FacilityKind.Desk: return Desk(mb, d);
+                case FacilityKind.Solar: return Solar(mb, d);
+                case FacilityKind.Suppression: return Suppression(mb, d);
             }
             mb.Box(new Vector3(0, 0.5f, 0), new Vector3(0.8f, 1f, 0.8f), d.color);
             return 1f;
@@ -235,6 +237,53 @@ namespace DCT
             mb.Box(new Vector3(0, 0.72f, -0.52f), new Vector3(0.36f, 0.5f, 0.05f), new Color(0.15f, 0.17f, 0.22f));
             mb.Prism(new Vector3(0, 0.02f, -0.35f), 0.03f, 0.03f, 0.42f, 6, new Color(0.3f, 0.3f, 0.3f));
             return 1.2f;
+        }
+
+        static float Solar(MeshBuilder mb, FacilityDef d)
+        {
+            float s = d.w;
+            Color frame = new Color(0.6f, 0.6f, 0.62f);
+            int rows = d.w;
+            for (int r = 0; r < rows; r++)
+            {
+                float z = -s * 0.5f + (r + 0.5f) * s / rows;
+                var rot = Quaternion.Euler(-25f, 0, 0);
+                mb.Box(new Vector3(-s * 0.3f, 0.35f, z), new Vector3(0.05f, 0.7f, 0.05f), frame);
+                mb.Box(new Vector3(s * 0.3f, 0.35f, z), new Vector3(0.05f, 0.7f, 0.05f), frame);
+                mb.Box(new Vector3(0, 0.75f, z), new Vector3(s * 0.92f, 0.04f, s / rows * 0.8f), d.color, rot);
+                for (int i = 0; i < 4; i++)
+                    mb.Box(new Vector3(-s * 0.46f + (i + 0.5f) * s * 0.23f, 0.775f, z), new Vector3(0.01f, 0.01f, s / rows * 0.72f), new Color(0.75f, 0.8f, 0.9f), rot);
+            }
+            return 1.1f;
+        }
+
+        static float Suppression(MeshBuilder mb, FacilityDef d)
+        {
+            Color red = d.color;
+            for (int i = 0; i < 3; i++)
+            {
+                mb.Prism(new Vector3(-0.25f + i * 0.25f, 0, 0.1f), 0.11f, 0.11f, 1.3f, 10, red);
+                mb.Prism(new Vector3(-0.25f + i * 0.25f, 1.3f, 0.1f), 0.11f, 0.05f, 0.12f, 10, MeshBuilder.Shade(red, 0.8f));
+                mb.Box(new Vector3(-0.25f + i * 0.25f, 1.47f, 0.1f), new Vector3(0.06f, 0.08f, 0.06f), new Color(0.75f, 0.75f, 0.75f));
+            }
+            mb.Box(new Vector3(0, 1.6f, 0.1f), new Vector3(0.7f, 0.05f, 0.05f), new Color(0.7f, 0.7f, 0.72f));
+            mb.Box(new Vector3(0, 0.9f, -0.15f), new Vector3(0.3f, 0.35f, 0.05f), new Color(0.85f, 0.85f, 0.85f));
+            mb.Box(new Vector3(0, 1.0f, -0.18f), new Vector3(0.06f, 0.06f, 0.01f), MeshBuilder.Led(new Color(0.2f, 1f, 0.3f)));
+            return 1.65f;
+        }
+
+        public static void Person(MeshBuilder mb, Color shirt)
+        {
+            Color skin = new Color(0.86f, 0.68f, 0.55f);
+            Color pants = new Color(0.18f, 0.2f, 0.26f);
+            mb.Box(new Vector3(-0.07f, 0.22f, 0), new Vector3(0.09f, 0.44f, 0.1f), pants);
+            mb.Box(new Vector3(0.07f, 0.22f, 0), new Vector3(0.09f, 0.44f, 0.1f), pants);
+            mb.Box(new Vector3(0, 0.63f, 0), new Vector3(0.28f, 0.4f, 0.16f), shirt);
+            mb.Box(new Vector3(-0.18f, 0.62f, 0), new Vector3(0.07f, 0.34f, 0.08f), shirt);
+            mb.Box(new Vector3(0.18f, 0.62f, 0), new Vector3(0.07f, 0.34f, 0.08f), shirt);
+            mb.Box(new Vector3(0, 0.93f, 0), new Vector3(0.17f, 0.18f, 0.17f), skin);
+            mb.Box(new Vector3(0, 1.03f, -0.01f), new Vector3(0.19f, 0.05f, 0.19f), MeshBuilder.Shade(shirt, 0.6f));
+            mb.Box(new Vector3(0, 0.66f, 0.085f), new Vector3(0.12f, 0.12f, 0.01f), MeshBuilder.Led(new Color(0.9f, 0.9f, 1f)));
         }
 
         // ---- Scenery ----

@@ -33,6 +33,16 @@ namespace DCT
         public Vector2Int dragStart;
         public string toolHint;
         public PlacedObject connectFrom;
+        public bool connectSecondary;
+        public AudioFx audio;
+
+        // ---- undo ----
+        readonly List<string> undoStack = new List<string>();
+        float lastSnapshot = -10f;
+        public int UndoCount => undoStack.Count;
+
+        /// <summary>Fraction of the current in-game hour that has elapsed (for smooth animation).</summary>
+        public float HourFraction => speed == 0 ? 1f : Mathf.Clamp01(hourAccum);
 
         public static string SavePath(int slot) => Path.Combine(Application.persistentDataPath, $"datacenter_slot{slot}.json");
 
@@ -47,6 +57,8 @@ namespace DCT
             if (I != null && I != this) { Destroy(gameObject); return; }
             I = this;
             Application.targetFrameRate = 120;
+            Settings.Load();
+            Catalog.EnsureLoaded();
             QualitySettings.shadowDistance = 90f;
             SetupScene();
         }
@@ -67,52 +79,74 @@ namespace DCT
             yield return null; yield return null;
 
             StartNewGame(20261117, "Normal");
+            sim.popups.Clear();
             AutoManager.BuildStarter(sim);
             for (int d = 0; d < days; d++)
             {
                 AutoManager.DailyManage(sim);
                 for (int h = 0; h < 24; h++) { sim.TickHour(); while (sim.popups.Count > 0) { var p = sim.popups.Dequeue(); p.options[0].Value?.Invoke(); } }
             }
+            // Advance to early afternoon, break a few servers so staff are out walking.
+            while (sim.S.hour % 24 != 13) sim.TickHour();
+            var broken = sim.Racks.Where(r => r.devices.Count > 0).Take(3).ToList();
+            foreach (var r in broken) { r.devices[0].failed = true; sim.MarkDirty(r); }
+            sim.TickHour();
+            sim.popups.Clear();
             speed = 0;
             var S = sim.S;
-            cam.SnapTo(new Vector3((S.ownX0 + S.ownX1) * 0.5f, 0, (S.ownY0 + S.ownY1) * 0.5f - 1f), 24f);
-            for (int k = 0; k < 10; k++) yield return null;
-            ScreenCapture.CaptureScreenshot(Path.Combine(dir, "1_overview.png"));
-            yield return null; yield return null;
+            S.weather = "Clear";
+            var center = new Vector3((S.ownX0 + S.ownX1) * 0.5f, 0, (S.ownY0 + S.ownY1) * 0.5f);
+            System.Collections.IEnumerator Shot(string name)
+            {
+                for (int k = 0; k < 12; k++) yield return null;
+                ScreenCapture.CaptureScreenshot(Path.Combine(dir, name + ".png"));
+                yield return null; yield return null;
+            }
+
+            cam.SnapTo(center - Vector3.forward, 24f);
+            yield return Shot("01_overview");
 
             var rack = sim.Racks.FirstOrDefault(r => r.devices.Count > 0);
-            if (rack != null)
-            {
-                selection.Clear(); selection.Add(rack);
-                cam.SnapTo(new Vector3(rack.x + 0.5f, 0, rack.y + 0.5f), 11f);
-            }
-            for (int k = 0; k < 10; k++) yield return null;
-            ScreenCapture.CaptureScreenshot(Path.Combine(dir, "2_rack.png"));
-            yield return null; yield return null;
-
+            if (rack != null) { selection.Clear(); selection.Add(rack); cam.SnapTo(new Vector3(rack.x + 0.5f, 0, rack.y + 0.5f), 10f); }
+            yield return Shot("02_rack_inspector");
             selection.Clear();
+
+            var staffer = S.staff.FirstOrDefault(m => m.state != "idle") ?? S.staff.FirstOrDefault();
+            if (staffer != null) cam.SnapTo(new Vector3(staffer.x, 0, staffer.y), 7f);
+            yield return Shot("03_staff_closeup");
+
+            cam.SnapTo(center, 24f);
             ui.OpenWindow(GameUI.Window.Market);
-            cam.SnapTo(new Vector3((S.ownX0 + S.ownX1) * 0.5f, 0, (S.ownY0 + S.ownY1) * 0.5f), 24f);
-            for (int k = 0; k < 10; k++) yield return null;
-            ScreenCapture.CaptureScreenshot(Path.Combine(dir, "3_market.png"));
-            yield return null; yield return null;
-
+            yield return Shot("04_market");
             ui.OpenWindow(GameUI.Window.Contracts);
-            view.heatOverlay = true;
-            for (int k = 0; k < 10; k++) yield return null;
-            ScreenCapture.CaptureScreenshot(Path.Combine(dir, "4_contracts_heat.png"));
-            yield return null; yield return null;
-
+            yield return Shot("05_contracts");
+            ui.OpenWindow(GameUI.Window.Staff);
+            yield return Shot("06_staff");
+            ui.OpenWindow(GameUI.Window.Goals);
+            yield return Shot("07_goals");
+            ui.OpenWindow(GameUI.Window.Dashboard);
+            yield return Shot("08_dashboard");
             ui.OpenWindow(GameUI.Window.None);
-            for (int k = 0; k < 10; k++) yield return null;
-            ScreenCapture.CaptureScreenshot(Path.Combine(dir, "4b_heat.png"));
-            yield return null; yield return null;
-            view.heatOverlay = false;
-            BeginPlace(Catalog.Facility("rack_std"));
-            ui.ToggleBuildMenu();
-            for (int k = 0; k < 10; k++) yield return null;
-            ScreenCapture.CaptureScreenshot(Path.Combine(dir, "5_build.png"));
-            yield return null; yield return null; yield return null;
+
+            view.SetOverlay(Overlay.Airflow);
+            cam.SnapTo(center, 18f);
+            yield return Shot("09_overlay_airflow");
+            view.SetOverlay(Overlay.Network);
+            yield return Shot("10_overlay_network");
+            view.SetOverlay(Overlay.None);
+
+            S.hour = S.Day * 24 + 22;
+            S.weather = "Rain";
+            cam.SnapTo(center, 22f);
+            yield return Shot("11_night_rain");
+            S.weather = "Clear";
+            S.hour = S.Day * 24 + 13;
+
+            ui.OpenWindow(GameUI.Window.Settings);
+            yield return Shot("12_settings");
+            ui.OpenWindow(GameUI.Window.None);
+            inGame = false;
+            yield return Shot("13_mainmenu");
             Application.Quit();
         }
 
@@ -148,14 +182,23 @@ namespace DCT
             RenderSettings.fog = false;
 
             view = new GameObject("World").AddComponent<WorldView>();
+            view.gm = this;
             ui = gameObject.AddComponent<GameUI>();
             ui.gm = this;
+            audio = gameObject.AddComponent<AudioFx>();
+            audio.gm = this;
         }
 
         // ================================================================ game lifecycle
-        public void StartNewGame(int seed, string difficulty)
+        public void StartNewGame(int seed, string difficulty) => StartNewGame(seed, difficulty, "sandbox");
+
+        public void StartNewGame(int seed, string difficulty, string scenario)
         {
-            LoadState(Simulation.NewGame(seed, difficulty));
+            undoStack.Clear();
+            LoadState(Simulation.NewGame(seed, difficulty, scenario));
+            var sc = Simulation.Scenario(scenario);
+            if (sc.id != "sandbox")
+                sim.popups.Enqueue(new Popup { title = "Scenario: " + sc.name, body = sc.desc + "\n\nGoal: " + sc.goal + "\n\nTrack your progress in the Goals window [" + Settings.KeyName("Goals") + "]." }.Add("Let's go", null));
             var S = sim.S;
             cam.SnapTo(new Vector3((S.ownX0 + S.ownX1) * 0.5f, 0, (S.ownY0 + S.ownY1) * 0.5f), 26f);
             ui.showObjectives = true;
@@ -163,7 +206,7 @@ namespace DCT
             speed = 1;
         }
 
-        void LoadState(GameState s)
+        void LoadState(GameState s, bool keepView = false)
         {
             if (s.rooms == null || s.rooms.Length != s.mapW * s.mapH) s.rooms = new int[s.mapW * s.mapH];
             if (s.obstacles == null || s.obstacles.Length != s.mapW * s.mapH) s.obstacles = new int[s.mapW * s.mapH];
@@ -171,14 +214,49 @@ namespace DCT
             foreach (var o in s.objects)
                 if (o.contractId > 0 && !s.contracts.Any(c => c.id == o.contractId && (c.status == ContractStatus.Setup || c.status == ContractStatus.Active)))
                     o.contractId = -1;
+            var oldSel = selection.Select(o => o.id).ToList();
             sim = new Simulation(s);
-            sim.OnLog += (t, sev) => ui.Toast(t, sev);
+            sim.OnLog += (t, sev) => { ui.Toast(t, sev); audio?.OnLog(sev); };
+            sim.BeforeChange += OnBeforeChange;
             if (view.sim == null) view.Init(sim); else view.ResetSim(sim);
             cam.boundsMax = new Vector2(s.mapW, s.mapH);
             selection.Clear();
-            SetTool(Tool.Select);
+            if (keepView) foreach (var id in oldSel) if (sim.objById.TryGetValue(id, out var o)) selection.Add(o);
+            if (!keepView) SetTool(Tool.Select);
             inGame = true;
             hourAccum = 0;
+        }
+
+        // ================================================================ undo
+        void OnBeforeChange()
+        {
+            if (Time.unscaledTime - lastSnapshot < 0.5f && undoStack.Count > 0) return;
+            lastSnapshot = Time.unscaledTime;
+            undoStack.Add(JsonUtility.ToJson(sim.S));
+            if (undoStack.Count > 30) undoStack.RemoveAt(0);
+        }
+
+        public void Undo()
+        {
+            if (undoStack.Count == 0) { ui.Toast("Nothing to undo.", 0); return; }
+            string json = undoStack[undoStack.Count - 1];
+            undoStack.RemoveAt(undoStack.Count - 1);
+            var s = JsonUtility.FromJson<GameState>(json);
+            LoadState(s, true);
+            lastSnapshot = -10f;
+            ui.Toast("Undone.", 0);
+        }
+
+        public static string SlotMeta(int slot)
+        {
+            try { return PlayerPrefs.GetString("slotmeta_" + slot, File.Exists(SavePath(slot)) ? "Saved game" : ""); } catch { return ""; }
+        }
+
+        void WriteMeta(int slot)
+        {
+            var S = sim.S;
+            string meta = $"{S.city.name} - {Simulation.Scenario(S.scenario).name} - {S.DateString().Substring(0, 11)} - ${S.money:N0} - Lv {S.Level}";
+            try { PlayerPrefs.SetString("slotmeta_" + slot, meta); PlayerPrefs.Save(); } catch { }
         }
 
         public bool Save(int slot = 1)
@@ -187,6 +265,7 @@ namespace DCT
             try
             {
                 File.WriteAllText(SavePath(slot), JsonUtility.ToJson(sim.S));
+                WriteMeta(slot);
                 ui.Toast($"Game saved (slot {slot}).", 1);
                 return true;
             }
@@ -200,6 +279,7 @@ namespace DCT
             try
             {
                 var s = JsonUtility.FromJson<GameState>(File.ReadAllText(p));
+                undoStack.Clear();
                 LoadState(s);
                 cam.SnapTo(new Vector3((s.ownX0 + s.ownX1) * 0.5f, 0, (s.ownY0 + s.ownY1) * 0.5f), 26f);
                 ui.OpenWindow(GameUI.Window.None);
@@ -232,7 +312,7 @@ namespace DCT
                     if (sim.popups.Count > 0) { hourAccum = 0; break; }
                 }
                 if (hourAccum > 8f) hourAccum = 0f;
-                if (sim.AutoSaveRequested) { sim.AutoSaveRequested = false; try { File.WriteAllText(SavePath(0), JsonUtility.ToJson(sim.S)); } catch { } }
+                if (sim.AutoSaveRequested) { sim.AutoSaveRequested = false; if (Settings.Autosave) { try { File.WriteAllText(SavePath(0), JsonUtility.ToJson(sim.S)); WriteMeta(0); } catch { } } }
             }
 
             HandleHotkeys();
@@ -245,21 +325,27 @@ namespace DCT
         void HandleHotkeys()
         {
             if (ui.textFocus) return;
-            if (Input.GetKeyDown(KeyCode.Space)) speed = speed == 0 ? 1 : 0;
+            if (Settings.Down("Pause")) speed = speed == 0 ? 1 : 0;
+            bool ctrl = Input.GetKey(KeyCode.LeftControl) || Input.GetKey(KeyCode.RightControl);
+            if (ctrl && Settings.Down("Undo")) Undo();
+            if (Settings.Down("Staff")) ui.ToggleWindow(GameUI.Window.Staff);
+            if (Settings.Down("Goals")) ui.ToggleWindow(GameUI.Window.Goals);
+            if (Settings.Down("Dashboard")) ui.ToggleWindow(GameUI.Window.Dashboard);
+            if (Settings.Down("CycleOverlay")) view.CycleOverlay();
             if (Input.GetKeyDown(KeyCode.Alpha1) || Input.GetKeyDown(KeyCode.Keypad1)) speed = 1;
             if (Input.GetKeyDown(KeyCode.Alpha2) || Input.GetKeyDown(KeyCode.Keypad2)) speed = 2;
             if (Input.GetKeyDown(KeyCode.Alpha3) || Input.GetKeyDown(KeyCode.Keypad3)) speed = 3;
             if (Input.GetKeyDown(KeyCode.Alpha4) || Input.GetKeyDown(KeyCode.Keypad4)) speed = 4;
-            if (Input.GetKeyDown(KeyCode.R) && tool == Tool.Place) placeRot = (placeRot + 1) % 4;
-            if (Input.GetKeyDown(KeyCode.B)) ui.ToggleBuildMenu();
-            if (Input.GetKeyDown(KeyCode.F)) SetTool(Tool.Foundation);
-            if (Input.GetKeyDown(KeyCode.X) || Input.GetKeyDown(KeyCode.Delete)) { if (selection.Count > 0 && tool == Tool.Select) ui.ConfirmRemoveSelection(); else SetTool(Tool.Demolish); }
-            if (Input.GetKeyDown(KeyCode.C)) ui.ToggleWindow(GameUI.Window.Contracts);
-            if (Input.GetKeyDown(KeyCode.M)) ui.ToggleWindow(GameUI.Window.Market);
-            if (Input.GetKeyDown(KeyCode.T)) ui.ToggleWindow(GameUI.Window.Research);
-            if (Input.GetKeyDown(KeyCode.H)) view.heatOverlay = !view.heatOverlay;
-            if (Input.GetKeyDown(KeyCode.F5)) Save(1);
-            if (Input.GetKeyDown(KeyCode.F9)) Load(1);
+            if (Settings.Down("Rotate") && tool == Tool.Place) placeRot = (placeRot + 1) % 4;
+            if (Settings.Down("Equipment")) ui.ToggleBuildMenu();
+            if (Settings.Down("Foundation")) SetTool(Tool.Foundation);
+            if (!ctrl && (Settings.Down("Demolish") || Input.GetKeyDown(KeyCode.Delete))) { if (selection.Count > 0 && tool == Tool.Select) ui.ConfirmRemoveSelection(); else SetTool(Tool.Demolish); }
+            if (!ctrl && Settings.Down("Contracts")) ui.ToggleWindow(GameUI.Window.Contracts);
+            if (Settings.Down("Market")) ui.ToggleWindow(GameUI.Window.Market);
+            if (Settings.Down("Research")) ui.ToggleWindow(GameUI.Window.Research);
+            if (Settings.Down("HeatMap")) view.SetOverlay(view.overlay == Overlay.Heat ? Overlay.None : Overlay.Heat);
+            if (Settings.Down("QuickSave")) Save(1);
+            if (Settings.Down("QuickLoad")) Load(1);
             if (Input.GetKeyDown(KeyCode.Escape))
             {
                 if (tool != Tool.Select) SetTool(Tool.Select);
@@ -285,10 +371,11 @@ namespace DCT
             placeDef = d;
         }
 
-        public void BeginConnect(PlacedObject rack)
+        public void BeginConnect(PlacedObject rack, bool secondary = false)
         {
             SetTool(Tool.Connect);
             connectFrom = rack;
+            connectSecondary = secondary;
         }
 
         PlacedObject PickObject()
@@ -316,6 +403,7 @@ namespace DCT
                 if (!dragging) { view.HideGhost(); }
                 return;
             }
+            if (Input.GetMouseButtonDown(0) || Input.GetMouseButtonDown(1)) GUIUtility.keyboardControl = 0;
             if (!cam.MouseGround(out var gp)) return;
             var tile = new Vector2Int(Mathf.FloorToInt(gp.x), Mathf.FloorToInt(gp.z));
             hoverTile = tile;
@@ -408,8 +496,8 @@ namespace DCT
                         if (!targets.Contains(connectFrom)) targets.Add(connectFrom);
                         foreach (var rack in targets)
                         {
-                            if (rack.linkCore == target.id) continue;
-                            string err = sim.Connect(rack, target);
+                            if (rack.linkCore == target.id || (connectSecondary && rack.linkCore2 == target.id)) continue;
+                            string err = connectSecondary ? sim.ConnectSecondary(rack, target) : sim.Connect(rack, target);
                             if (err != null) { ui.Toast(err, 2); break; }
                         }
                         SetTool(Tool.Select);

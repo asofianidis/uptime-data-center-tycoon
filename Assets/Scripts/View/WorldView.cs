@@ -4,10 +4,9 @@ using UnityEngine;
 
 namespace DCT
 {
-    public class WorldView : MonoBehaviour
+    public partial class WorldView : MonoBehaviour
     {
         public Simulation sim;
-        public bool heatOverlay;
         public bool showCables = true;
         public bool showGrid;
         public int highlightContract = -1;
@@ -25,8 +24,9 @@ namespace DCT
             public Mesh mesh;
             public Transform led;
             public Material ledMat;
-            public LineRenderer cable;
+            public LineRenderer cable, cable2;
             public float height;
+            public bool hasModel;
         }
         readonly Dictionary<int, ObjView> views = new Dictionary<int, ObjView>();
 
@@ -70,6 +70,10 @@ namespace DCT
             sim = s;
             foreach (var v in views.Values) Destroy(v.go);
             views.Clear();
+            foreach (var v in staffViews.Values) Destroy(v.go);
+            staffViews.Clear();
+            foreach (var g in overlayMarkers.Values) if (g != null) Destroy(g);
+            overlayMarkers.Clear();
             builtTilesVersion = -1; builtObjectsVersion = -1;
             Rebuild();
         }
@@ -106,6 +110,9 @@ namespace DCT
             SyncObjects(builtObjectsVersion != sim.objectsVersion);
             UpdateGroundOverlay();
             UpdateStatusLights();
+            UpdateOverlayMarkers();
+            UpdateStaff();
+            UpdateEnvironment();
             gridGO.SetActive(showGrid);
         }
 
@@ -301,6 +308,12 @@ namespace DCT
             }
         }
 
+        public void ForceRebuildObject(int id)
+        {
+            if (views.TryGetValue(id, out var v)) { Destroy(v.go); views.Remove(id); }
+            builtObjectsVersion = -1;
+        }
+
         void CreateView(PlacedObject o)
         {
             var d = Catalog.Facility(o.def);
@@ -322,11 +335,23 @@ namespace DCT
             led.GetComponent<MeshRenderer>().sharedMaterial = v.ledMat;
             v.led = led.transform;
             views[o.id] = v;
+            if (d.kind != FacilityKind.Rack)
+            {
+                var model = ModelLibrary.Instantiate(string.IsNullOrEmpty(d.model) ? d.id : d.model, v.go.transform);
+                if (model != null)
+                {
+                    v.hasModel = true;
+                    v.height = ModelLibrary.Height(model);
+                    v.led.localPosition = new Vector3(0, v.height + 0.04f, 0);
+                    return;
+                }
+            }
             RebuildMesh(o, v);
         }
 
         void RebuildMesh(PlacedObject o, ObjView v)
         {
+            if (v.hasModel) return;
             var d = Catalog.Facility(o.def);
             var mb = new MeshBuilder();
             v.height = Models.Build(mb, d, o, sim);
@@ -337,28 +362,34 @@ namespace DCT
         void UpdateCable(PlacedObject o)
         {
             if (!views.TryGetValue(o.id, out var v)) return;
-            PlacedObject core = o.linkCore > 0 && sim.objById.TryGetValue(o.linkCore, out var c) ? c : null;
+            UpdateCableLine(o, v, o.linkCore, ref v.cable, 0f);
+            UpdateCableLine(o, v, o.linkCore2, ref v.cable2, 0.12f);
+        }
+
+        void UpdateCableLine(PlacedObject o, ObjView v, int coreId, ref LineRenderer line, float extraOffset)
+        {
+            PlacedObject core = coreId > 0 && sim.objById.TryGetValue(coreId, out var c) ? c : null;
             if (core == null)
             {
-                if (v.cable != null) { Destroy(v.cable.gameObject); v.cable = null; }
+                if (line != null) { Destroy(line.gameObject); line = null; }
                 return;
             }
-            if (v.cable == null)
+            if (line == null)
             {
                 var go = new GameObject("Cable");
                 go.transform.SetParent(v.go.transform, false);
-                v.cable = go.AddComponent<LineRenderer>();
-                v.cable.sharedMaterial = unlitMat;
-                v.cable.useWorldSpace = true;
-                v.cable.widthMultiplier = 0.06f;
-                v.cable.numCornerVertices = 2;
-                v.cable.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+                line = go.AddComponent<LineRenderer>();
+                line.sharedMaterial = unlitMat;
+                line.useWorldSpace = true;
+                line.widthMultiplier = 0.06f;
+                line.numCornerVertices = 2;
+                line.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
             }
             var a = ObjectCenter(Catalog.Facility(o.def), o.x, o.y, o.rot);
             var b = ObjectCenter(Catalog.Facility(core.def), core.x, core.y, core.rot);
-            float tray = 2.45f + (o.id % 5) * 0.04f;
+            float tray = 2.45f + (o.id % 5) * 0.04f + extraOffset;
             float ha = views[o.id].height, hb = views.TryGetValue(core.id, out var cv) ? cv.height : 2f;
-            float off = ((o.id % 7) - 3) * 0.05f;
+            float off = ((o.id % 7) - 3) * 0.05f + extraOffset;
             var pts = new[]
             {
                 a + Vector3.up * ha,
@@ -367,12 +398,13 @@ namespace DCT
                 new Vector3(b.x + off, tray, b.z + off),
                 b + Vector3.up * hb,
             };
-            v.cable.positionCount = pts.Length;
-            v.cable.SetPositions(pts);
+            line.positionCount = pts.Length;
+            line.SetPositions(pts);
             sim.racks.TryGetValue(o.id, out var info);
             float g = info != null ? info.linkGbps : 10f;
             Color col = g >= 400 ? new Color(0.85f, 0.4f, 1f) : g >= 100 ? new Color(0.2f, 0.95f, 0.9f) : g >= 40 ? new Color(0.3f, 0.6f, 1f) : new Color(1f, 0.75f, 0.2f);
-            v.cable.startColor = v.cable.endColor = col;
+            if (extraOffset > 0) col = Color.Lerp(col, Color.white, 0.35f);
+            line.startColor = line.endColor = col;
         }
 
         void UpdateStatusLights()
@@ -382,6 +414,7 @@ namespace DCT
             {
                 if (!views.TryGetValue(o.id, out var v)) continue;
                 if (v.cable != null) v.cable.enabled = showCables;
+                if (v.cable2 != null) v.cable2.enabled = showCables;
                 Color c; bool flash = false;
                 var d = Catalog.Facility(o.def);
                 if (d.kind == FacilityKind.Rack)
@@ -394,7 +427,7 @@ namespace DCT
                     else c = new Color(0.2f, 1f, 0.3f);
                     if (highlightContract > 0 && o.contractId == highlightContract) { c = Color.white; flash = true; }
                 }
-                else if (o.failed) { c = new Color(1f, 0.15f, 0.1f); flash = true; }
+                else if (o.failed || o.pduTripped) { c = new Color(1f, 0.15f, 0.1f); flash = true; }
                 else c = new Color(0.2f, 1f, 0.3f);
                 float k = flash ? blink : 1f;
                 v.ledMat.color = c * 0.4f;

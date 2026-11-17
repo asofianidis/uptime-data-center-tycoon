@@ -49,6 +49,24 @@ namespace DCT.EditorTools
             if (Application.isBatchMode) EditorApplication.Exit(report.summary.result == UnityEditor.Build.Reporting.BuildResult.Succeeded ? 0 : 1);
         }
 
+        [MenuItem("Uptime/Check Models")]
+        public static void CheckModels()
+        {
+            var sb = new StringBuilder();
+            foreach (var go in Resources.LoadAll<GameObject>("Models"))
+            {
+                var inst = UnityEngine.Object.Instantiate(go);
+                var rs = inst.GetComponentsInChildren<Renderer>();
+                var b = rs[0].bounds;
+                foreach (var r in rs) b.Encapsulate(r.bounds);
+                sb.AppendLine($"{go.name}: size {b.size.x:0.00} x {b.size.y:0.00} x {b.size.z:0.00}  center {b.center.x:0.00},{b.center.y:0.00},{b.center.z:0.00}  rot {inst.transform.localEulerAngles}  mats {string.Join(",", rs.SelectMany(r => r.sharedMaterials).Select(m => m.name + ":" + m.shader.name).Distinct().Take(4))}");
+                UnityEngine.Object.DestroyImmediate(inst);
+            }
+            File.WriteAllText("Logs/models.txt", sb.ToString());
+            Debug.Log("[Uptime] Models checked");
+            if (Application.isBatchMode) EditorApplication.Exit(0);
+        }
+
         /// <summary>Headless balance/crash test: several seeds, an automated player, two in-game years.</summary>
         [MenuItem("Uptime/Run Simulation Test")]
         public static void RunSimTest()
@@ -105,6 +123,27 @@ namespace DCT.EditorTools
                         sb.AppendLine($"seed {seed} {diff}: EXCEPTION {e}");
                     }
                 }
+            }
+            foreach (var sc in Simulation.Scenarios)
+            {
+                try
+                {
+                    var s = Simulation.NewGame(77, "Normal", sc.id);
+                    var sim = new Simulation(s);
+                    AutoManager.BuildStarter(sim);
+                    for (int d = 0; d < 360 && !s.gameOver; d++)
+                    {
+                        AutoManager.DailyManage(sim);
+                        for (int h = 0; h < 24; h++)
+                        {
+                            sim.TickHour();
+                            while (sim.popups.Count > 0) sim.popups.Dequeue().options[0].Value?.Invoke();
+                        }
+                    }
+                    float prog = sim.ScenarioProgress(out string txt);
+                    sb.AppendLine($"scenario {sc.id}: ${s.money:N0} lvl {s.Level} progress {prog:P0} ({txt}) done {s.scenarioDone} achievements {s.achievements.Count} staff {s.staff.Count} solar {sim.solarCapKW:0}kW");
+                }
+                catch (Exception e) { ok = false; sb.AppendLine($"scenario {sc.id}: EXCEPTION {e}"); }
             }
             foreach (var kv in causes.OrderByDescending(x => x.Value)) sb.AppendLine($"  downtime cause: {kv.Value}h  {kv.Key}");
             // Contract generator variety sample

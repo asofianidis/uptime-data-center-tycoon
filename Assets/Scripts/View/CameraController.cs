@@ -42,6 +42,13 @@ namespace DCT
                 if (Input.GetKey(KeyCode.S) || Input.GetKey(KeyCode.DownArrow)) move -= fwd;
                 if (Input.GetKey(KeyCode.D) || Input.GetKey(KeyCode.RightArrow)) move += right;
                 if (Input.GetKey(KeyCode.A) || Input.GetKey(KeyCode.LeftArrow)) move -= right;
+                if (Settings.EdgePan && Application.isFocused)
+                {
+                    var mp = Input.mousePosition;
+                    const float edge = 6f;
+                    if (mp.x <= edge) move -= right; else if (mp.x >= Screen.width - edge) move += right;
+                    if (mp.y <= edge) move -= fwd; else if (mp.y >= Screen.height - edge) move += fwd;
+                }
                 float speed = (8f + distance * 0.9f) * (Input.GetKey(KeyCode.LeftShift) ? 2f : 1f);
                 focus += move.normalized * speed * dt;
 
@@ -59,8 +66,8 @@ namespace DCT
                     float scroll = Input.mouseScrollDelta.y;
                     if (Mathf.Abs(scroll) > 0.01f) targetDist = Mathf.Clamp(targetDist * Mathf.Pow(0.88f, scroll), minDist, maxDist);
                 }
-                if (Input.GetKeyDown(KeyCode.Q)) targetYaw -= 90f;
-                if (Input.GetKeyDown(KeyCode.E)) targetYaw += 90f;
+                if (Settings.Down("CamLeft")) targetYaw -= 90f;
+                if (Settings.Down("CamRight")) targetYaw += 90f;
                 if (Input.GetKey(KeyCode.PageUp)) pitch = Mathf.Clamp(pitch + 40f * dt, 35f, 85f);
                 if (Input.GetKey(KeyCode.PageDown)) pitch = Mathf.Clamp(pitch - 40f * dt, 35f, 85f);
             }

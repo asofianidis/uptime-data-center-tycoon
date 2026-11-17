@@ -46,6 +46,17 @@ namespace DCT
             return 1f;
         }
 
+        public void RotateRack(PlacedObject o)
+        {
+            var d = Catalog.Facility(o.def);
+            if (d.w != d.h) return;
+            Checkpoint();
+            o.rot = (o.rot + 1) & 3;
+            MarkDirty(o);
+            objectsVersion++;
+            Recompute();
+        }
+
         // ================================================================ redundancy
         bool CoreOk(int id, out FacilityDef def, out string issue)
         {
@@ -979,7 +990,7 @@ namespace DCT
         {
             new ScenarioDef { id = "sandbox", name = "Sandbox", desc = "Endless play on a random map.", goal = "No goal - build the biggest, most reliable data center you can.", days = 0 },
             new ScenarioDef { id = "desert", name = "Desert Heat", desc = "A scorching desert city where cooling is brutal.", goal = "Reach $150,000/month recurring revenue within 3 years.", days = 1080 },
-            new ScenarioDef { id = "shoestring", name = "Shoestring", desc = "Start with only $70,000.", goal = "Reach reputation level 5 within 2 years.", days = 720 },
+            new ScenarioDef { id = "shoestring", name = "Shoestring", desc = "Start with only $110,000 - every dollar counts.", goal = "Reach reputation level 5 within 2 years.", days = 720 },
             new ScenarioDef { id = "aiboom", name = "AI Boom", desc = "Everyone wants GPUs. You start at level 5 with GPU servers researched.", goal = "Run 96 GPUs online for customers within 2 years.", days = 720 },
             new ScenarioDef { id = "blackout", name = "Blackout Belt", desc = "A storm-battered grid with constant outages. Generators are researched.", goal = "Complete 15 contracts with an average uptime of 99.9%+ within 2 years.", days = 720 },
             new ScenarioDef { id = "green", name = "Green Mandate", desc = "A heavy carbon tax and eco-conscious customers.", goal = "Hit 40% solar energy in a month while earning $100,000/month.", days = 1080 },
@@ -992,7 +1003,7 @@ namespace DCT
             switch (s.scenario)
             {
                 case "desert": s.city.climate = "Desert"; s.city.coolingFactor = 0.68f; s.city.solarFactor = 1.3f; s.city.blurb = "Relentless desert heat. " + s.city.blurb; break;
-                case "shoestring": s.money = 70000; break;
+                case "shoestring": s.money = 110000; break;
                 case "aiboom":
                     s.xp = Catalog.XpForLevel(5); s.peakLevel = 5;
                     s.unlocked.AddRange(new[] { "srv_gpu4", "rack_hd", "tor_25g", "isp_100", "gen" });
@@ -1016,15 +1027,22 @@ namespace DCT
                 case "aiboom": text = $"{OnlineCustomerGpus} / 96 GPUs"; return OnlineCustomerGpus / 96f;
                 case "blackout":
                 {
-                    var done = S.contracts.Where(c => c.status == ContractStatus.Completed).ToList();
-                    float avg = done.Count == 0 ? 0 : done.Average(c => Uptime(c, false));
-                    text = $"{done.Count}/15 contracts, avg uptime {avg:0.00}%";
-                    return done.Count / 15f * (avg >= 99.9f ? 1f : 0.95f);
+                    float avg = BlackoutUptime();
+                    text = $"{S.contractsCompleted}/15 contracts completed, avg uptime {avg:0.00}%";
+                    return Mathf.Min(1f, S.contractsCompleted / 15f) * (avg >= 99.9f ? 1f : 0.95f);
                 }
                 case "green": text = $"Solar {S.lastSolarShare * 100:0}% / 40%, ${MonthlyRevenue:N0} / $100,000"; return Mathf.Min(S.lastSolarShare / 0.4f, MonthlyRevenue / 100000f);
             }
             text = "";
             return 0;
+        }
+
+        float BlackoutUptime()
+        {
+            var served = S.contracts.Where(c => c.totalHours > 0).ToList();
+            if (served.Count == 0) return 0f;
+            float hours = served.Sum(c => (float)c.totalHours);
+            return 100f * (1f - served.Sum(c => c.totalDown) / hours);
         }
 
         void CheckScenario()
@@ -1038,12 +1056,7 @@ namespace DCT
                 case "desert": won = MonthlyRevenue >= 150000; break;
                 case "shoestring": won = S.Level >= 5; break;
                 case "aiboom": won = OnlineCustomerGpus >= 96; break;
-                case "blackout":
-                {
-                    var done = S.contracts.Where(c => c.status == ContractStatus.Completed).ToList();
-                    won = done.Count >= 15 && done.Average(c => Uptime(c, false)) >= 99.9f;
-                    break;
-                }
+                case "blackout": won = S.contractsCompleted >= 15 && BlackoutUptime() >= 99.9f; break;
                 case "green": won = S.lastSolarShare >= 0.4f && MonthlyRevenue >= 100000; break;
             }
             if (won)
