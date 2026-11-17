@@ -515,7 +515,17 @@ namespace DCT
         /// <summary>Objects technicians couldn't path to this hour (boxed in by other equipment).</summary>
         public readonly HashSet<int> unreachable = new HashSet<int>();
 
+        readonly Dictionary<int, bool> reachCache = new Dictionary<int, bool>();
+        int reachVersion = -1, reachTiles = -1;
+
         public bool IsReachable(PlacedObject o)
+        {
+            if (reachVersion != objectsVersion || reachTiles != tilesVersion) { reachCache.Clear(); reachVersion = objectsVersion; reachTiles = tilesVersion; }
+            if (reachCache.TryGetValue(o.id, out bool cached)) return cached;
+            return reachCache[o.id] = IsReachableNow(o);
+        }
+
+        bool IsReachableNow(PlacedObject o)
         {
             var any = S.staff.FirstOrDefault();
             var start = any != null ? new Vector2(any.x, any.y) : DeskPosition(0);

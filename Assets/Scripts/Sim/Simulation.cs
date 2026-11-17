@@ -184,9 +184,33 @@ namespace DCT
             return false;
         }
 
-        public Contract FindContract(int id) => S.contracts.FirstOrDefault(c => c.id == id);
+        readonly Dictionary<int, Contract> contractCache = new Dictionary<int, Contract>();
 
-        public IEnumerable<PlacedObject> Racks => S.objects.Where(o => Catalog.Facility(o.def)?.kind == FacilityKind.Rack);
+        public Contract FindContract(int id)
+        {
+            if (contractCache.TryGetValue(id, out var c) && S.contracts.Contains(c)) return c;
+            c = S.contracts.FirstOrDefault(x => x.id == id);
+            if (c != null) contractCache[id] = c;
+            return c;
+        }
+
+        List<PlacedObject> rackCache;
+        int rackCacheVersion = -1, rackCacheCount = -1;
+
+        /// <summary>All racks, cached until objects are added or removed.</summary>
+        public List<PlacedObject> Racks
+        {
+            get
+            {
+                if (rackCache == null || rackCacheVersion != objectsVersion || rackCacheCount != S.objects.Count)
+                {
+                    rackCache = S.objects.Where(o => Catalog.Facility(o.def)?.kind == FacilityKind.Rack).ToList();
+                    rackCacheVersion = objectsVersion;
+                    rackCacheCount = S.objects.Count;
+                }
+                return rackCache;
+            }
+        }
 
         public IEnumerable<PlacedObject> ObjectsOfKind(FacilityKind k) => S.objects.Where(o => Catalog.Facility(o.def)?.kind == k);
 
@@ -395,10 +419,18 @@ namespace DCT
 
             // ---- Contract provisioning ----
             provision.Clear();
+            var byContract = new Dictionary<int, List<PlacedObject>>();
+            foreach (var o in rackList)
+                if (o.contractId > 0)
+                {
+                    if (!byContract.TryGetValue(o.contractId, out var l)) byContract[o.contractId] = l = new List<PlacedObject>();
+                    l.Add(o);
+                }
+            var none = new List<PlacedObject>();
             foreach (var c in S.contracts)
             {
                 if (c.status != ContractStatus.Setup && c.status != ContractStatus.Active) continue;
-                provision[c.id] = Evaluate(c, rackList);
+                provision[c.id] = Evaluate(c, byContract.TryGetValue(c.id, out var lst) ? lst : none);
             }
         }
 
@@ -1175,7 +1207,7 @@ namespace DCT
             MarkOccupancy(o, 0);
             S.objects.Remove(o);
             objById.Remove(o.id);
-            foreach (var r in Racks)
+            foreach (var r in Racks.ToList())
             {
                 if (r.linkCore == o.id) { r.linkCore = -1; MarkDirty(r); }
                 if (r.linkCore2 == o.id) { r.linkCore2 = -1; MarkDirty(r); }
