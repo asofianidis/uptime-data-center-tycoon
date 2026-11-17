@@ -55,10 +55,10 @@ namespace DCT
 
     public static class Catalog
     {
-        public const float FoundationCost = 150f;
-        public const float UpperFloorCost = 260f;
-        public const float RoomPaintCost = 25f;
-        public const float CableBaseCost = 200f;
+        public const float FoundationCost = 110f;
+        public const float UpperFloorCost = 195f;
+        public const float RoomPaintCost = 20f;
+        public const float CableBaseCost = 150f;
         public const float CablePerTile = 30f;
         public const float TechSalary = 3200f;
         public const int HoursPerDay = 24;
@@ -106,71 +106,71 @@ namespace DCT
         public static readonly List<FacilityDef> Facilities = new List<FacilityDef>
         {
             // ---- Racks ----
-            new FacilityDef { id = "rack_std", name = "42U Rack", kind = FacilityKind.Rack, room = RoomType.ServerHall, cost = 1500, rackU = 42, rackKW = 8, level = 1,
+            new FacilityDef { id = "rack_std", name = "42U Rack", kind = FacilityKind.Rack, room = RoomType.ServerHall, cost = 1100, rackU = 42, rackKW = 8, level = 1,
                 desc = "Standard rack with an 8 kW PDU.", color = new Color(0.12f, 0.13f, 0.15f) },
-            new FacilityDef { id = "rack_hd", name = "48U High-Density Rack", kind = FacilityKind.Rack, room = RoomType.ServerHall, cost = 4500, rackU = 48, rackKW = 20, level = 4, research = 40000,
+            new FacilityDef { id = "rack_hd", name = "48U High-Density Rack", kind = FacilityKind.Rack, room = RoomType.ServerHall, cost = 3400, rackU = 48, rackKW = 20, level = 4, research = 40000,
                 desc = "Taller rack with a 20 kW PDU.", color = new Color(0.1f, 0.1f, 0.12f) },
-            new FacilityDef { id = "rack_ai", name = "52U AI Pod Rack", kind = FacilityKind.Rack, room = RoomType.ServerHall, cost = 15000, rackU = 52, rackKW = 60, level = 7, research = 200000,
+            new FacilityDef { id = "rack_ai", name = "52U AI Pod Rack", kind = FacilityKind.Rack, room = RoomType.ServerHall, cost = 11000, rackU = 52, rackKW = 60, level = 7, research = 200000,
                 desc = "Reinforced rack with a 60 kW PDU for GPU clusters.", color = new Color(0.08f, 0.1f, 0.1f) },
 
             // ---- Cooling ----
-            new FacilityDef { id = "crac", model = "crac", name = "CRAC Unit", kind = FacilityKind.Cooling, room = RoomType.ServerHall, cost = 8000, watts = 7000, coolingKW = 40, level = 1,
+            new FacilityDef { id = "crac", model = "crac", name = "CRAC Unit", kind = FacilityKind.Cooling, room = RoomType.ServerHall, cost = 6000, watts = 7000, coolingKW = 40, level = 1,
                 desc = "Computer-room air conditioner. Cools 40 kW of heat in its server hall.", color = new Color(0.85f, 0.88f, 0.9f) },
-            new FacilityDef { id = "inrow", model = "inrow", name = "In-Row Cooler", kind = FacilityKind.Cooling, room = RoomType.ServerHall, cost = 16000, watts = 8000, coolingKW = 75, level = 3, research = 25000,
+            new FacilityDef { id = "inrow", model = "inrow", name = "In-Row Cooler", kind = FacilityKind.Cooling, room = RoomType.ServerHall, cost = 12000, watts = 8000, coolingKW = 75, level = 3, research = 25000,
                 desc = "Close-coupled cooling, 75 kW.", color = new Color(0.75f, 0.85f, 0.95f) },
-            new FacilityDef { id = "liquid", name = "Liquid Cooling CDU", kind = FacilityKind.Cooling, room = RoomType.ServerHall, w = 2, h = 1, cost = 70000, watts = 15000, coolingKW = 300, level = 6, research = 180000,
+            new FacilityDef { id = "liquid", name = "Liquid Cooling CDU", kind = FacilityKind.Cooling, room = RoomType.ServerHall, w = 2, h = 1, cost = 52500, watts = 15000, coolingKW = 300, level = 6, research = 180000,
                 desc = "Coolant distribution unit, 300 kW of cooling.", color = new Color(0.4f, 0.75f, 0.95f) },
 
             // ---- Network ----
-            new FacilityDef { id = "core_10g", model = "core", name = "Core Switch 24x10G", kind = FacilityKind.CoreSwitch, room = RoomType.Network, cost = 12000, watts = 800, ports = 24, portGbps = 10, level = 1,
+            new FacilityDef { id = "core_10g", model = "core", name = "Core Switch 24x10G", kind = FacilityKind.CoreSwitch, room = RoomType.Network, cost = 9000, watts = 800, ports = 24, portGbps = 10, level = 1,
                 desc = "Aggregates up to 24 racks at 10G each.", color = new Color(0.15f, 0.3f, 0.6f) },
-            new FacilityDef { id = "core_40g", model = "core", name = "Core Switch 48x40G", kind = FacilityKind.CoreSwitch, room = RoomType.Network, cost = 38000, watts = 1500, ports = 48, portGbps = 40, level = 3, research = 35000,
+            new FacilityDef { id = "core_40g", model = "core", name = "Core Switch 48x40G", kind = FacilityKind.CoreSwitch, room = RoomType.Network, cost = 28500, watts = 1500, ports = 48, portGbps = 40, level = 3, research = 35000,
                 desc = "48 rack ports at 40G.", color = new Color(0.15f, 0.35f, 0.75f) },
-            new FacilityDef { id = "core_100g", model = "core", name = "Spine Router 64x100G", kind = FacilityKind.CoreSwitch, room = RoomType.Network, cost = 95000, watts = 2500, ports = 64, portGbps = 100, level = 5, research = 110000,
+            new FacilityDef { id = "core_100g", model = "core", name = "Spine Router 64x100G", kind = FacilityKind.CoreSwitch, room = RoomType.Network, cost = 71000, watts = 2500, ports = 64, portGbps = 100, level = 5, research = 110000,
                 desc = "64 rack ports at 100G.", color = new Color(0.2f, 0.45f, 0.9f) },
-            new FacilityDef { id = "core_400g", model = "core", name = "Spine Router 64x400G", kind = FacilityKind.CoreSwitch, room = RoomType.Network, cost = 260000, watts = 4500, ports = 64, portGbps = 400, level = 8, research = 450000,
+            new FacilityDef { id = "core_400g", model = "core", name = "Spine Router 64x400G", kind = FacilityKind.CoreSwitch, room = RoomType.Network, cost = 195000, watts = 4500, ports = 64, portGbps = 400, level = 8, research = 450000,
                 desc = "64 rack ports at 400G.", color = new Color(0.35f, 0.55f, 1f) },
-            new FacilityDef { id = "isp_10", model = "isp", name = "ISP Fiber 10G", kind = FacilityKind.Isp, room = RoomType.Network, cost = 5000, watts = 200, bandwidth = 10, monthly = 900, level = 1,
+            new FacilityDef { id = "isp_10", model = "isp", name = "ISP Fiber 10G", kind = FacilityKind.Isp, room = RoomType.Network, cost = 3750, watts = 200, bandwidth = 10, monthly = 900, level = 1,
                 desc = "10 Gbps of internet transit. Monthly fee applies.", color = new Color(0.95f, 0.55f, 0.15f) },
-            new FacilityDef { id = "isp_100", model = "isp", name = "ISP Fiber 100G", kind = FacilityKind.Isp, room = RoomType.Network, cost = 25000, watts = 400, bandwidth = 100, monthly = 6000, level = 4, research = 50000,
+            new FacilityDef { id = "isp_100", model = "isp", name = "ISP Fiber 100G", kind = FacilityKind.Isp, room = RoomType.Network, cost = 19000, watts = 400, bandwidth = 100, monthly = 6000, level = 4, research = 50000,
                 desc = "100 Gbps transit line.", color = new Color(1f, 0.65f, 0.2f) },
-            new FacilityDef { id = "isp_400", model = "isp", name = "Dark Fiber 400G", kind = FacilityKind.Isp, room = RoomType.Network, cost = 90000, watts = 800, bandwidth = 400, monthly = 18000, level = 7, research = 250000,
+            new FacilityDef { id = "isp_400", model = "isp", name = "Dark Fiber 400G", kind = FacilityKind.Isp, room = RoomType.Network, cost = 67500, watts = 800, bandwidth = 400, monthly = 18000, level = 7, research = 250000,
                 desc = "Private dark fiber with 400 Gbps.", color = new Color(1f, 0.8f, 0.3f) },
 
             // ---- Power ----
-            new FacilityDef { id = "xfmr", model = "xfmr", name = "Utility Transformer", kind = FacilityKind.Transformer, room = RoomType.Outdoor, cost = 20000, supplyKW = 150, level = 1,
+            new FacilityDef { id = "xfmr", model = "xfmr", name = "Utility Transformer", kind = FacilityKind.Transformer, room = RoomType.Outdoor, cost = 15000, supplyKW = 150, level = 1,
                 desc = "Outdoor grid connection, 150 kW. Must sit on owned land outside the building.", color = new Color(0.45f, 0.55f, 0.45f) },
-            new FacilityDef { id = "xfmr_big", name = "Substation Feed", kind = FacilityKind.Transformer, room = RoomType.Outdoor, w = 2, h = 2, cost = 120000, supplyKW = 1200, level = 5, research = 90000,
+            new FacilityDef { id = "xfmr_big", name = "Substation Feed", kind = FacilityKind.Transformer, room = RoomType.Outdoor, w = 2, h = 2, cost = 90000, supplyKW = 1200, level = 5, research = 90000,
                 desc = "Dedicated substation, 1.2 MW.", color = new Color(0.4f, 0.5f, 0.4f) },
-            new FacilityDef { id = "swgear", model = "swgear", name = "Switchgear Panel", kind = FacilityKind.Switchgear, room = RoomType.Power, cost = 10000, supplyKW = 250, level = 1,
+            new FacilityDef { id = "swgear", model = "swgear", name = "Switchgear Panel", kind = FacilityKind.Switchgear, room = RoomType.Power, cost = 7500, supplyKW = 250, level = 1,
                 desc = "Distributes up to 250 kW to the building. Usable supply is the lower of transformer and switchgear capacity.", color = new Color(0.6f, 0.6f, 0.62f) },
-            new FacilityDef { id = "swgear_big", name = "Main Distribution Board", kind = FacilityKind.Switchgear, room = RoomType.Power, w = 2, h = 1, cost = 60000, supplyKW = 1500, level = 5, research = 80000,
+            new FacilityDef { id = "swgear_big", name = "Main Distribution Board", kind = FacilityKind.Switchgear, room = RoomType.Power, w = 2, h = 1, cost = 45000, supplyKW = 1500, level = 5, research = 80000,
                 desc = "Distributes 1.5 MW.", color = new Color(0.55f, 0.55f, 0.6f) },
-            new FacilityDef { id = "ups", model = "ups", name = "UPS Battery Bank", kind = FacilityKind.Ups, room = RoomType.Power, cost = 15000, backupKW = 100, level = 1,
+            new FacilityDef { id = "ups", model = "ups", name = "UPS Battery Bank", kind = FacilityKind.Ups, room = RoomType.Power, cost = 11000, backupKW = 100, level = 1,
                 desc = "Rides through short grid outages for up to 100 kW of load. Needed for generators to take over.", color = new Color(0.2f, 0.22f, 0.25f) },
-            new FacilityDef { id = "ups_li", model = "ups", name = "Li-ion UPS", kind = FacilityKind.Ups, room = RoomType.Power, cost = 60000, backupKW = 500, level = 4, research = 60000,
+            new FacilityDef { id = "ups_li", model = "ups", name = "Li-ion UPS", kind = FacilityKind.Ups, room = RoomType.Power, cost = 45000, backupKW = 500, level = 4, research = 60000,
                 desc = "500 kW lithium-ion UPS.", color = new Color(0.15f, 0.25f, 0.3f) },
-            new FacilityDef { id = "gen", model = "gen", name = "Diesel Generator", kind = FacilityKind.Generator, room = RoomType.Outdoor, w = 2, h = 1, cost = 45000, backupKW = 300, level = 2, research = 10000,
+            new FacilityDef { id = "gen", model = "gen", name = "Diesel Generator", kind = FacilityKind.Generator, room = RoomType.Outdoor, w = 2, h = 1, cost = 34000, backupKW = 300, level = 2, research = 10000,
                 desc = "Outdoor backup generator, 300 kW. Covers long outages together with UPS.", color = new Color(0.9f, 0.75f, 0.15f) },
-            new FacilityDef { id = "gen_big", name = "Turbine Generator", kind = FacilityKind.Generator, room = RoomType.Outdoor, w = 2, h = 2, cost = 200000, backupKW = 1500, level = 6, research = 150000,
+            new FacilityDef { id = "gen_big", name = "Turbine Generator", kind = FacilityKind.Generator, room = RoomType.Outdoor, w = 2, h = 2, cost = 150000, backupKW = 1500, level = 6, research = 150000,
                 desc = "1.5 MW gas turbine.", color = new Color(0.85f, 0.6f, 0.15f) },
 
             // ---- Energy & safety ----
-            new FacilityDef { id = "solar", model = "solar", name = "Solar Array", kind = FacilityKind.Solar, room = RoomType.Outdoor, w = 2, h = 2, cost = 35000, supplyKW = 60, level = 3, research = 25000,
+            new FacilityDef { id = "solar", model = "solar", name = "Solar Array", kind = FacilityKind.Solar, room = RoomType.Outdoor, w = 2, h = 2, cost = 26000, supplyKW = 60, level = 3, research = 25000,
                 desc = "Generates up to 60 kW in full sun, cutting your grid bill and carbon tax. Output follows the sun and weather.", color = new Color(0.15f, 0.25f, 0.5f) },
-            new FacilityDef { id = "solar_big", name = "Solar Farm Block", kind = FacilityKind.Solar, room = RoomType.Outdoor, w = 3, h = 3, cost = 110000, supplyKW = 220, level = 6, research = 90000,
+            new FacilityDef { id = "solar_big", name = "Solar Farm Block", kind = FacilityKind.Solar, room = RoomType.Outdoor, w = 3, h = 3, cost = 82500, supplyKW = 220, level = 6, research = 90000,
                 desc = "High-efficiency bifacial panels, up to 220 kW.", color = new Color(0.12f, 0.2f, 0.45f) },
-            new FacilityDef { id = "suppress", model = "suppress", name = "Fire Suppression System", kind = FacilityKind.Suppression, room = RoomType.ServerHall, cost = 12000, watts = 100, level = 2, research = 8000,
+            new FacilityDef { id = "suppress", model = "suppress", name = "Fire Suppression System", kind = FacilityKind.Suppression, room = RoomType.ServerHall, cost = 9000, watts = 100, level = 2, research = 8000,
                 desc = "Inert-gas suppression for its whole server hall: fires are put out before they destroy hardware.", color = new Color(0.85f, 0.15f, 0.12f) },
 
-            new FacilityDef { id = "bess", name = "Battery Storage (BESS)", kind = FacilityKind.Battery, room = RoomType.Power, w = 2, h = 1, cost = 90000, supplyKW = 100, capacityKWh = 400, level = 4, research = 60000,
+            new FacilityDef { id = "bess", name = "Battery Storage (BESS)", kind = FacilityKind.Battery, room = RoomType.Power, w = 2, h = 1, cost = 67500, supplyKW = 100, capacityKWh = 400, level = 4, research = 60000,
                 desc = "400 kWh lithium battery. Charges when power is cheap (night), discharges at the evening peak, and backs up the grid during outages.", color = new Color(0.2f, 0.45f, 0.35f) },
 
-            new FacilityDef { id = "elevator", name = "Elevator & Cable Riser", kind = FacilityKind.Elevator, room = RoomType.Corridor, cost = 40000, watts = 2000, level = 1,
+            new FacilityDef { id = "elevator", name = "Elevator & Cable Riser", kind = FacilityKind.Elevator, room = RoomType.Corridor, cost = 30000, watts = 2000, level = 1,
                 desc = "Connects floors for staff and network cables. Place one at the same spot on each floor you want to link (in a Corridor).", color = new Color(0.55f, 0.6f, 0.68f) },
 
             // ---- Office ----
-            new FacilityDef { id = "desk", model = "desk", name = "Technician Desk", kind = FacilityKind.Desk, room = RoomType.Office, cost = 1500, watts = 300, staff = 1, level = 1,
+            new FacilityDef { id = "desk", model = "desk", name = "Technician Desk", kind = FacilityKind.Desk, room = RoomType.Office, cost = 1100, watts = 300, staff = 1, level = 1,
                 desc = "Workspace for one technician. Technicians repair failed hardware automatically.", color = new Color(0.55f, 0.4f, 0.28f) },
         };
 

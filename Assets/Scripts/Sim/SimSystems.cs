@@ -79,7 +79,7 @@ namespace DCT
             return gaps.Count == 0 ? null : "Missing " + string.Join(", ", gaps);
         }
 
-        public const float DualPduCost = 900f;
+        public const float DualPduCost = 675f;
 
         public string BuyDualPdu(PlacedObject rack)
         {
@@ -221,7 +221,7 @@ namespace DCT
         }
 
         // ================================================================ cable trays & raised floors
-        public const float TrayCost = 40f, RaisedCost = 70f;
+        public const float TrayCost = 30f, RaisedCost = 50f;
         int[] trayComp;
 
         void RebuildTrayComponents()
