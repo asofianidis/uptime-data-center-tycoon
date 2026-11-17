@@ -12,9 +12,38 @@ namespace DCT.EditorTools
     {
         const string ScenePath = "Assets/Scenes/Main.unity";
 
+        /// <summary>Creates the UI Toolkit runtime theme and panel settings used by GameUI.</summary>
+        [MenuItem("Uptime/Setup UI Assets")]
+        public static void SetupUiAssets()
+        {
+            Directory.CreateDirectory("Assets/Resources/UI");
+            const string themePath = "Assets/Resources/UI/UptimeTheme.tss";
+            if (!File.Exists(themePath))
+            {
+                File.WriteAllText(themePath, "@import url(\"unity-theme://default\");\n");
+                AssetDatabase.ImportAsset(themePath, ImportAssetOptions.ForceSynchronousImport);
+            }
+            const string panelPath = "Assets/Resources/UI/UptimePanel.asset";
+            var ps = AssetDatabase.LoadAssetAtPath<UnityEngine.UIElements.PanelSettings>(panelPath);
+            if (ps == null)
+            {
+                ps = ScriptableObject.CreateInstance<UnityEngine.UIElements.PanelSettings>();
+                AssetDatabase.CreateAsset(ps, panelPath);
+            }
+            ps.themeStyleSheet = AssetDatabase.LoadAssetAtPath<UnityEngine.UIElements.ThemeStyleSheet>(themePath);
+            ps.scaleMode = UnityEngine.UIElements.PanelScaleMode.ScaleWithScreenSize;
+            ps.referenceResolution = new Vector2Int(1600, 900);
+            ps.screenMatchMode = UnityEngine.UIElements.PanelScreenMatchMode.MatchWidthOrHeight;
+            ps.match = 1f;
+            EditorUtility.SetDirty(ps);
+            AssetDatabase.SaveAssets();
+            Debug.Log($"[Uptime] UI assets ready (theme {(ps.themeStyleSheet != null ? "ok" : "MISSING")})");
+        }
+
         [MenuItem("Uptime/Setup Main Scene")]
         public static void SetupScene()
         {
+            SetupUiAssets();
             Directory.CreateDirectory("Assets/Scenes");
             var scene = EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
             var cam = new GameObject("Main Camera", typeof(Camera), typeof(AudioListener));

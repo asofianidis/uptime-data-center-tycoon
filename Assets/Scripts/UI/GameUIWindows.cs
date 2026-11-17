@@ -1,0 +1,616 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using UnityEngine;
+using UnityEngine.UIElements;
+
+namespace DCT
+{
+    public partial class GameUI
+    {
+        string WindowSignature()
+        {
+            switch (window)
+            {
+                case Window.Market: return $"m|{string.Join(",", S.offers.Select(o => o.id + (o.negotiated ? "n" : "") + o.monthlyPay))}|{S.rivals.Count}";
+                case Window.Contracts: return $"c|{contractsTab}|{string.Join(",", S.contracts.Select(c => c.id + c.status.ToString()))}|{string.Join(",", S.tickets.Select(t => t.id))}";
+                case Window.Research: return $"r|{S.unlocked.Count}|{S.Level}";
+                case Window.Finance: return $"f|{S.reports.Count}";
+                case Window.Staff: return $"s|{staffTab}|{S.activeSite}|{string.Join(",", S.staff.Select(m => m.id + m.shift))}|{string.Join(",", S.candidates.Select(c => c.name))}|{S.ownX0},{S.ownY0},{S.ownX1},{S.ownY1}";
+                case Window.Log: return $"l|{S.log.Count}|{(S.log.Count > 0 ? S.log[S.log.Count - 1].hour : 0)}";
+                case Window.Goals: return $"g|{S.achievements.Count}|{S.ipo}|{S.scenarioDone}";
+                case Window.Dashboard: return "d";
+                case Window.Sites: return $"st|{Sim.company.sims.Count}|{S.activeSite}|{S.Level}";
+                case Window.Sandbox: return $"sb|{S.cheatInfiniteMoney}{S.cheatNoFailures}{S.cheatNoEvents}{S.cheatNoBankruptcy}";
+                default: return window.ToString();
+            }
+        }
+
+        static readonly HashSet<Window> PanelWindows = new HashSet<Window> { Window.Market, Window.Contracts, Window.Research, Window.Finance, Window.Staff, Window.Log, Window.Goals, Window.Dashboard, Window.Sites, Window.Sandbox };
+
+        void BuildWindow(VisualElement r, Scope s)
+        {
+            if (!PanelWindows.Contains(window)) return;
+            var p = K.Panel(r, "grow");
+            var head = K.Row(p);
+            K.Text(head, window switch
+            {
+                Window.Market => "Contract Market",
+                Window.Contracts => "Your Contracts",
+                Window.Research => "Research & Unlocks",
+                Window.Finance => "Finance",
+                Window.Staff => "Staff & Land" + (Sim.company.MultiSite ? $" - {S.siteName}" : ""),
+                Window.Log => "Event Log",
+                Window.Goals => "Goals & Achievements",
+                Window.Dashboard => "Dashboard",
+                Window.Sites => "Sites",
+                Window.Sandbox => "Sandbox Tools",
+                _ => ""
+            }, "header");
+            K.Flex(head);
+            K.Small(head, "Close", () => OpenWindow(Window.None));
+            switch (window)
+            {
+                case Window.Market: MarketWindow(p, s); break;
+                case Window.Contracts: ContractsWindow(p, s); break;
+                case Window.Research: ResearchWindow(p, s); break;
+                case Window.Finance: FinanceWindow(p, s); break;
+                case Window.Staff: StaffWindow(p, s); break;
+                case Window.Log: LogWindow(p, s); break;
+                case Window.Goals: GoalsWindow(p, s); break;
+                case Window.Dashboard: DashboardWindow(p, s); break;
+                case Window.Sites: SitesWindow(p, s); break;
+                case Window.Sandbox: SandboxWindow(p, s); break;
+            }
+        }
+
+        // ---------------------------------------------------------------- contracts helpers
+        static string Requirement(Contract c) => ProcGen.Describe(c) + $"  +  {c.reqBandwidth:0.#} Gbps";
+
+        string Estimate(Contract c)
+        {
+            var devs = Catalog.Devices.Where(d => d.kind == DeviceKind.Server && Sim.IsUnlocked(d.id)).ToList();
+            switch (c.type)
+            {
+                case ContractType.Colocation:
+                {
+                    var rack = Catalog.Facilities.Where(f => f.kind == FacilityKind.Rack && Sim.IsUnlocked(f.id) && f.rackKW >= c.reqKWPerRack).OrderBy(f => f.cost).FirstOrDefault();
+                    if (rack == null) return $"!Needs racks rated for {c.reqKWPerRack:0} kW - research a denser rack first.";
+                    return $"Needs {c.reqRacks} x {rack.name} with a ToR switch. Power: {c.reqRacks * c.reqKWPerRack:0} kW.";
+                }
+                case ContractType.Dedicated:
+                {
+                    var best = devs.Where(d => d.cores >= c.reqCoresPerServer).OrderBy(d => d.cost).FirstOrDefault();
+                    if (best == null) return $"!No researched server has {c.reqCoresPerServer}+ cores.";
+                    return $"~{c.reqServers} x {best.name} ({K.Money(Sim.DeviceCost(best) * c.reqServers)}), {c.reqServers * best.watts / 1000f:0.0} kW";
+                }
+                case ContractType.Compute:
+                {
+                    var best = devs.Where(d => d.cores > 0).OrderBy(d => d.cost / d.cores).First();
+                    int n = Mathf.CeilToInt(c.reqCores / (float)best.cores);
+                    return $"~{n} x {best.name} ({K.Money(Sim.DeviceCost(best) * n)}), {n * best.watts / 1000f:0.0} kW";
+                }
+                case ContractType.Storage:
+                {
+                    var best = devs.Where(d => d.storageTB > 0).OrderBy(d => d.cost / d.storageTB).First();
+                    int n = Mathf.CeilToInt(c.reqStorageTB / best.storageTB);
+                    return $"~{n} x {best.name} ({K.Money(Sim.DeviceCost(best) * n)}), {n * best.watts / 1000f:0.0} kW";
+                }
+                case ContractType.GpuCloud:
+                {
+                    var best = devs.Where(d => d.gpus > 0).OrderBy(d => d.cost / d.gpus).FirstOrDefault();
+                    if (best == null) return "!Research GPU servers first.";
+                    int n = Mathf.CeilToInt(c.reqGpus / (float)best.gpus);
+                    return $"~{n} x {best.name} ({K.Money(Sim.DeviceCost(best) * n)}), {n * best.watts / 1000f:0.0} kW";
+                }
+            }
+            return "";
+        }
+
+        void ContractHeader(VisualElement p, Scope s, Contract c)
+        {
+            var row = K.Row(p);
+            K.Swatch(row, Catalog.CustomerColors[c.colorIdx], 16);
+            K.Text(row, c.customer, "header");
+            K.Text(row, $"  {c.industry} - {Catalog.TypeName(c.type)}", "dim");
+            K.Flex(row);
+            K.Text(s, row, () => $"{K.Money(c.monthlyPay)}/mo", "big-pay");
+        }
+
+        void Traits(VisualElement p, Contract c)
+        {
+            foreach (var t in c.traits)
+            {
+                var row = K.Row(p);
+                var chip = K.Text(row, t, "chip");
+                chip.style.width = 96;
+                chip.style.unityTextAlign = TextAnchor.MiddleCenter;
+                K.Text(row, ProcGen.TraitDesc(t), "dim");
+            }
+        }
+
+        void ReqBar(VisualElement p, Scope s, string label, Func<float> have, float need, string unit)
+        {
+            var row = K.Row(p);
+            K.Text(row, label, "small").style.width = 80;
+            K.Bar(s, row, () => need <= 0 ? 1 : have() / need, () => have() >= need - 0.001f ? new Color(0.3f, 0.85f, 0.4f) : new Color(1f, 0.55f, 0.2f), () => $"{have():0.#} / {need:0.#} {unit}");
+        }
+
+        // ---------------------------------------------------------------- market
+        void MarketWindow(VisualElement p, Scope s)
+        {
+            K.Text(s, p, () => $"Offers refresh over time. Better reputation brings more and better-paying customers. Reputation level {S.Level}, rating {S.rating:0}/100.", "dim");
+            var rv = K.Row(p, "card");
+            K.Text(rv, "Competitors:", "dim").style.width = 90;
+            foreach (var rival in S.rivals)
+            {
+                K.Swatch(rv, Catalog.CustomerColors[rival.colorIdx], 10);
+                K.Text(rv, $"{rival.name}  rep {rival.reputation:0}  {rival.customers} customers", "small").style.marginRight = 10;
+            }
+            K.Flex(rv);
+            K.Text(s, rv, () => $"You: {Sim.YourCustomers} customers", "bold");
+            if (S.events.Any(e => e.type == "pricewar")) K.Text(p, "A price war is on: new offers pay 15% less.", "warn");
+
+            var sv = K.Scroll(p);
+            if (S.offers.Count == 0) K.Text(sv.contentContainer, "No offers right now. New customers will call soon.", "dim");
+            foreach (var c in S.offers.ToList())
+            {
+                var con = c;
+                var card = K.Card(sv.contentContainer);
+                ContractHeader(card, s, c);
+                K.Text(card, c.flavor, "dim");
+                K.Text(card, "Requires: " + Requirement(c), "bold");
+                K.Text(card, $"SLA {c.sla}% uptime    Term: {c.months} months    Setup window: {c.setupDays} days    Signing bonus: {K.Money(c.signingBonus)}");
+                Traits(card, c);
+                string est = Estimate(c);
+                K.Text(card, est.StartsWith("!") ? est.Substring(1) : "Estimate: " + est, est.StartsWith("!") ? "bad" : "dim");
+                var row = K.Row(card);
+                K.Text(s, row, () => $"Offer expires in {HoursToText(con.expiresHour - S.hour)}", "dim");
+                K.Flex(row);
+                if (!c.negotiated)
+                {
+                    K.Small(row, "Ask +15% pay", () => Toast(Sim.Negotiate(con, "pay"), 0));
+                    K.Small(row, "Ask +7 days", () => Toast(Sim.Negotiate(con, "time"), 0));
+                    if (c.sla > 99f) K.Small(row, "Ask lower SLA", () => Toast(Sim.Negotiate(con, "sla"), 0));
+                }
+                else K.Text(row, "Negotiated", "dim");
+                K.Btn(row, "Decline", () => Sim.DeclineOffer(con)).style.width = 90;
+                K.Btn(row, "Accept contract", () => Sim.AcceptOffer(con), "on").style.width = 150;
+            }
+        }
+
+        // ---------------------------------------------------------------- contracts
+        void ContractsWindow(VisualElement p, Scope s)
+        {
+            var tabs = K.Row(p);
+            K.Btn(s, tabs, () => "Active", () => contractsTab = 0, null, () => contractsTab == 0).style.width = 120;
+            K.Btn(s, tabs, () => "History", () => contractsTab = 1, null, () => contractsTab == 1).style.width = 120;
+            K.Flex(tabs);
+            K.Text(s, tabs, () => $"Completed {S.contractsCompleted}   Failed {S.contractsFailed}", "dim");
+            var sv = K.Scroll(p);
+            var c0 = sv.contentContainer;
+            if (contractsTab == 1)
+            {
+                foreach (var c in S.contracts.Where(x => x.status == ContractStatus.Completed || x.status == ContractStatus.Cancelled).Reverse())
+                {
+                    var row = K.Row(c0, "card");
+                    K.Swatch(row, Catalog.CustomerColors[c.colorIdx]);
+                    K.Text(row, $"{c.customer} - {Catalog.TypeName(c.type)}", "bold").style.width = 330;
+                    K.Text(row, c.status.ToString(), c.status == ContractStatus.Completed ? "good" : "bad").style.width = 90;
+                    K.Text(row, $"Earned {K.Money(c.earned)}   Uptime {Sim.Uptime(c, false):0.00}%", "small");
+                }
+                return;
+            }
+            var list = S.contracts.Where(x => x.status == ContractStatus.Setup || x.status == ContractStatus.Active).ToList();
+            if (list.Count == 0) K.Text(c0, "No active contracts. Visit the Market [M] to sign customers.", "dim");
+            foreach (var c in list)
+            {
+                var con = c;
+                var card = K.Card(c0);
+                ContractHeader(card, s, c);
+                K.Text(card, $"Requires: {Requirement(c)}    SLA {c.sla}%");
+                Traits(card, c);
+                Provision P() => Sim.provision.TryGetValue(con.id, out var pv) ? pv : new Provision();
+                switch (c.type)
+                {
+                    case ContractType.Colocation: ReqBar(card, s, "Racks", () => P().racks, c.reqRacks, "online"); break;
+                    case ContractType.Dedicated: ReqBar(card, s, "Servers", () => P().qualServers, c.reqServers, $"({c.reqCoresPerServer}+ cores)"); break;
+                    case ContractType.Compute: ReqBar(card, s, "Cores", () => P().cores, c.reqCores, "cores"); break;
+                    case ContractType.Storage: ReqBar(card, s, "Storage", () => P().storage, c.reqStorageTB, "TB"); break;
+                    case ContractType.GpuCloud: ReqBar(card, s, "GPUs", () => P().gpus, c.reqGpus, "GPUs"); break;
+                }
+                ReqBar(card, s, "Bandwidth", () => P().bandwidth, c.reqBandwidth, "Gbps");
+                var sat = K.Row(card);
+                K.Text(sat, "Satisfaction", "small").style.width = 80;
+                K.Bar(s, sat, () => con.satisfaction / 100f,
+                    () => con.satisfaction >= 70 ? new Color(0.3f, 0.85f, 0.4f) : con.satisfaction >= 40 ? new Color(1f, 0.75f, 0.2f) : new Color(1f, 0.3f, 0.25f),
+                    () => $"{con.satisfaction:0}/100" + (con.satisfaction < 35 ? "  - at risk of leaving for a rival!" : con.satisfaction > 75 ? "  - may refer new customers" : ""));
+                if (c.redundant) K.Text(card, "REDUNDANT: every rack needs dual PDU, 2 ToR switches and 2 core uplinks.", "small", "good");
+                if (c.geoRedundant) K.Text(card, "GEO-REDUNDANT: needs online racks in at least two of your sites.", "small", "good");
+                foreach (var t in S.tickets.Where(x => x.contractId == c.id).ToList())
+                {
+                    var tk = t;
+                    var row = K.Row(card, "card");
+                    K.Text(s, row, () =>
+                    {
+                        StaffMember who = null;
+                        if (tk.assigned >= 0) foreach (var site in S.sites) { who = site.staff.FirstOrDefault(m => m.id == tk.assigned); if (who != null) break; }
+                        return $"TICKET: {tk.text} (rack #{tk.rackId}) - due in {HoursToText(tk.deadlineHour - S.hour)} - fee {K.Money(tk.fee)}" + (who != null ? $" - {who.name} on it" : " - waiting for staff");
+                    }, "small", "wrap").style.flexShrink = 1;
+                    K.Flex(row);
+                    float ec = Sim.ExpediteCost(t);
+                    K.Small(s, row, () => $"Contractor {K.Money(ec)}", () => Report(Sim.ExpediteTicket(tk)), () => S.money >= ec);
+                }
+                var st = K.Text(s, card, () =>
+                {
+                    if (con.status == ContractStatus.Setup) return $"SETTING UP - deadline in {HoursToText(con.deadlineHour - S.hour)}. Goes live automatically once requirements are met.";
+                    float mu = Sim.Uptime(con, true);
+                    return $"Month {con.monthsServed + 1}/{con.months}   This month uptime {mu:0.000}% (SLA {con.sla}%)   Overall {Sim.Uptime(con, false):0.00}%   Breaches {con.breaches}/{(con.traits.Contains("Strict") ? 2 : 3)}   Earned {K.Money(con.earned)}";
+                }, "small", "wrap");
+                K.DynClass(s, st, () => con.status == ContractStatus.Setup ? "warn" : Sim.Uptime(con, true) < con.sla ? "bad" : null);
+                var prob = K.Text(s, card, () => !string.IsNullOrEmpty(con.lastIssue) && !con.meeting ? "Problem: " + con.lastIssue : "", "bad");
+                K.Show(s, prob, () => prob.text.Length > 0);
+                var act = K.Row(card);
+                K.Text(s, act, () => $"{Sim.company.AllRacks().Count(x => x.rack.contractId == con.id)} rack(s) assigned", "dim");
+                K.Flex(act);
+                K.Small(s, act, () => $"Assign {gm.selection.Count(o => Catalog.Facility(o.def).kind == FacilityKind.Rack)} selected rack(s)", () =>
+                {
+                    foreach (var rk in gm.selection.Where(o => Catalog.Facility(o.def).kind == FacilityKind.Rack).ToList()) { var e = Sim.Assign(rk, con); if (e != null) { Toast(e, 2); break; } }
+                }, () => gm.selection.Any(o => Catalog.Facility(o.def).kind == FacilityKind.Rack));
+                K.Small(s, act, () => gm.view.highlightContract == con.id ? "Stop highlight" : "Highlight racks", () => gm.view.highlightContract = gm.view.highlightContract == con.id ? -1 : con.id);
+                K.Small(act, "Select racks", () => { gm.selection.Clear(); gm.selection.AddRange(Sim.Racks.Where(o => o.contractId == con.id)); });
+                K.Small(act, $"Cancel ({K.Money(Sim.CancelPenalty(c))})", () => Confirm($"Cancel the contract with {con.customer}? You'll pay a {K.Money(Sim.CancelPenalty(con))} early termination fee and lose reputation.", () => Sim.CancelContract(con)));
+            }
+        }
+
+        // ---------------------------------------------------------------- research
+        void ResearchWindow(VisualElement p, Scope s)
+        {
+            K.Text(p, "Unlock new hardware with cash once your reputation level is high enough. Complete contracts reliably to gain reputation XP.", "dim");
+            var sv = K.Scroll(p);
+            for (int lvl = 1; lvl <= Catalog.MaxLevel; lvl++)
+            {
+                var items = new List<(string id, string name, string kind, string desc, float cost)>();
+                foreach (var d in Catalog.Devices.Where(x => x.level == lvl && x.research > 0))
+                    items.Add((d.id, d.name, d.kind == DeviceKind.Switch ? "Switch" : "Server",
+                        d.kind == DeviceKind.Switch ? $"{d.ports} ports, {d.uplinkGbps:0}G uplink" : $"{d.heightU}U, {d.cores} cores, {d.storageTB:0} TB{(d.gpus > 0 ? $", {d.gpus} GPU" : "")}, {d.watts:0} W", d.research));
+                foreach (var f in Catalog.Facilities.Where(x => x.level == lvl && x.research > 0))
+                    items.Add((f.id, f.name, Catalog.KindName(f.kind), f.desc, f.research));
+                if (items.Count == 0) continue;
+                bool reached = S.Level >= lvl;
+                K.Text(sv.contentContainer, $"LEVEL {lvl}" + (reached ? "" : $"  (reach {Catalog.XpForLevel(lvl)} XP)"), "section-title");
+                foreach (var it in items)
+                {
+                    var item = it;
+                    bool done = Sim.IsUnlocked(it.id);
+                    var row = K.Row(sv.contentContainer, "card");
+                    var col = K.Div(row, "grow");
+                    col.style.flexShrink = 1;
+                    K.Text(col, $"{it.name}   <{it.kind}>", done ? "good" : reached ? "bold" : "dim");
+                    K.Text(col, it.desc, "dim");
+                    if (done) K.Text(row, "Unlocked", "good");
+                    else K.Btn(s, row, () => $"Research {K.Money(item.cost)}", () => Report(Sim.Research(item.id)), () => S.Level >= lvl && S.money >= item.cost).style.width = 170;
+                }
+            }
+        }
+
+        // ---------------------------------------------------------------- finance
+        void FinanceWindow(VisualElement p, Scope s)
+        {
+            var top = K.Row(p);
+            top.style.alignItems = Align.FlexStart;
+            var left = K.Card(top);
+            left.style.width = 330;
+            K.Text(left, "This month so far", "bold");
+            void Row(string name, Func<float> v, bool expense)
+            {
+                var r = K.Row(left);
+                K.Text(r, name).style.width = 200;
+                var l = K.Text(s, r, () => (expense ? "-" : "+") + K.Money(v()));
+                K.DynClass(s, l, () => expense ? (v() > 0 ? "bad" : "dim") : "good");
+            }
+            Row("Contract income", () => S.current.income, false);
+            Row("Bonuses & grants", () => S.current.bonuses, false);
+            Row("SLA credits & penalties", () => S.current.penalties, true);
+            Row("Electricity", () => S.current.power, true);
+            Row("ISP transit fees", () => S.current.network, true);
+            Row("Salaries", () => S.current.salaries, true);
+            Row("Repairs, research & hiring", () => S.current.other, true);
+            Row("Construction & hardware", () => S.current.capex, true);
+            var net = K.Text(s, left, () => $"Net: {K.Money(S.current.Net)}", "bold");
+            K.DynClass(s, net, () => S.current.Net >= 0 ? "good" : "bad");
+
+            var right = K.Card(top);
+            right.style.flexGrow = 1;
+            K.Text(right, "Operations", "bold");
+            K.Text(s, right, () => $"Recurring revenue: {K.Money(Sim.MonthlyRevenue)}/mo", "good");
+            K.Text(s, right, () => $"Power at current load: {K.Money(Sim.company.sims.Sum(x => x.gridKW) * S.city.powerPrice * Catalog.HoursPerMonth)}/mo ({Sim.company.TotalLoadKW:0.0} kW across sites)", "wrap");
+            K.Text(s, right, () => $"ISP fees: {K.Money(S.sites.Sum(site => site.objects.Where(o => Catalog.Facility(o.def).kind == FacilityKind.Isp).Sum(o => Catalog.Facility(o.def).monthly)))}/mo");
+            K.Text(s, right, () => $"Salaries: {K.Money(S.sites.Sum(site => site.staff.Sum(m => m.salary)))}/mo");
+            K.Text(s, right, () => { float pue = Sim.itLoadKW > 0 ? Sim.loadKW / Sim.itLoadKW : 0; return $"PUE: {(pue > 0 ? pue.ToString("0.00") : "-")}   IT load {Sim.itLoadKW:0.0} kW (this site)"; });
+            K.Text(s, right, () => $"Lifetime revenue: {K.Money(S.lifetimeRevenue)}");
+            K.Text(right, $"Seed {S.seed}   {S.difficulty}   {Simulation.Scenario(S.scenario).name}", "dim");
+
+            K.Text(p, "Monthly net (last 12 months)", "bold");
+            var chart = new BarChart();
+            chart.style.height = 190;
+            chart.data = () => S.reports.Skip(Mathf.Max(0, S.reports.Count - 12)).Select(x => x.Net).ToList();
+            chart.labels = () => S.reports.Skip(Mathf.Max(0, S.reports.Count - 12)).Select(x => $"M{x.month + 1}").ToList();
+            p.Add(chart);
+            s.Add(chart.Refresh);
+            if (S.reports.Count == 0) K.Text(p, "No completed months yet.", "dim");
+        }
+
+        // ---------------------------------------------------------------- staff & land
+        void StaffWindow(VisualElement p, Scope s)
+        {
+            var tabs = K.Row(p);
+            K.Btn(s, tabs, () => "Team", () => staffTab = 0, null, () => staffTab == 0).style.width = 110;
+            K.Btn(s, tabs, () => $"Hire ({S.candidates.Count})", () => staffTab = 1, null, () => staffTab == 1).style.width = 110;
+            K.Btn(s, tabs, () => "Land", () => staffTab = 2, null, () => staffTab == 2).style.width = 110;
+            K.Flex(tabs);
+            K.Text(s, tabs, () => $"Desks {Sim.deskCount}   Day {Sim.ShiftCount("Day")}  Night {Sim.ShiftCount("Night")}   Payroll {K.Money(S.staff.Sum(m => m.salary))}/mo", "dim");
+            var sv = K.Scroll(p);
+            var c = sv.contentContainer;
+            if (staffTab == 0)
+            {
+                if (Sim.deskCount == 0) K.Text(c, "Paint an Office room and place desks. Each desk seats one employee per shift.", "warn");
+                K.Text(s, c, () =>
+                {
+                    int failed = S.objects.Count(o => o.failed || o.pduTripped) + S.objects.Sum(o => o.devices.Count(d => d.failed));
+                    return $"Open work: {failed} broken item(s), {S.tickets.Count} ticket(s).   Tickets resolved {S.ticketsDone}, missed {S.ticketsMissed}.   Security level {Sim.SecurityLevel}.";
+                }, "wrap");
+                if (S.staff.Count == 0) K.Text(c, "No employees at this site yet. Open the Hire tab.", "dim");
+                foreach (var m in S.staff.ToList())
+                {
+                    var mm = m;
+                    var row = K.Row(c, "card");
+                    K.Swatch(row, WorldView.RoleColor(m.role), 12);
+                    K.Text(row, m.name, "bold").style.width = 140;
+                    K.Text(row, $"{Simulation.RoleName(m.role)}  {new string('*', m.skill)}", "small").style.width = 150;
+                    K.Text(s, row, () => Sim.OnShift(mm) ? mm.shift : mm.shift + " (off)", "small").style.width = 72;
+                    var fat = K.Div(row);
+                    fat.style.width = 60;
+                    K.Bar(s, fat, () => mm.fatigue / 100f, () => mm.fatigue > 60 ? new Color(1f, 0.4f, 0.3f) : new Color(0.6f, 0.6f, 0.7f), null, 10);
+                    var stl = K.Text(s, row, () => StaffState(mm), "small");
+                    stl.style.width = 160;
+                    stl.style.marginLeft = 6;
+                    K.DynClass(s, stl, () => Sim.HasDesk(mm) ? null : "warn");
+                    K.Text(row, $"{K.Money(m.salary)}/mo", "small");
+                    K.Flex(row);
+                    K.Small(row, m.shift == "Night" ? "To day" : "To night", () => { Sim.SetShift(mm, mm.shift == "Night" ? "Day" : "Night"); windowSection.Invalidate(); });
+                    K.Small(row, "Let go", () => Confirm($"Let {mm.name} go?", () => Sim.FireStaff(mm)));
+                }
+            }
+            else if (staffTab == 1)
+            {
+                K.Text(c, "New candidates arrive every week. Matching a job to the right role makes it 50% faster; skill speeds up all work. Desks are shared between the day (07-19) and night (19-07) shifts.", "dim");
+                foreach (var role in Simulation.Roles) K.Text(c, $"{Simulation.RoleName(role)}: {Simulation.RoleDesc(role)}", "dim");
+                foreach (var cand in S.candidates.ToList())
+                {
+                    var cd = cand;
+                    var row = K.Row(c, "card");
+                    K.Swatch(row, WorldView.RoleColor(cand.role), 12);
+                    K.Text(row, cand.name, "bold").style.width = 150;
+                    K.Text(row, $"{Simulation.RoleName(cand.role)}  {new string('*', cand.skill)}", "small").style.width = 170;
+                    K.Text(row, $"{K.Money(cand.salary)}/mo", "small").style.width = 90;
+                    K.Flex(row);
+                    float fee = Sim.HireFee(cand);
+                    K.Small(s, row, () => $"Hire day ({K.Money(fee)})", () => Report(Sim.HireCandidate(cd, "Day")), () => Sim.ShiftCount("Day") < Sim.deskCount && S.money >= fee);
+                    K.Small(s, row, () => "Hire night +15%", () => Report(Sim.HireCandidate(cd, "Night")), () => Sim.ShiftCount("Night") < Sim.deskCount && S.money >= fee);
+                }
+            }
+            else
+            {
+                K.Text(c, $"You own a {S.ownX1 - S.ownX0} x {S.ownY1 - S.ownY0} lot in {S.city.name}. Buy 4-tile strips to expand. Land price multiplier: x{S.city.landPrice:0.00}.", "dim");
+                for (int d = 0; d < 4; d++)
+                {
+                    int dir = d;
+                    var row = K.Row(c);
+                    K.Text(row, Simulation.DirNames[d]).style.width = 80;
+                    if (Sim.CanExpand(d))
+                    {
+                        float cost = Sim.LandCost(d);
+                        K.Btn(s, row, () => $"Buy strip ({K.Money(cost)})", () => { Report(Sim.BuyLand(dir)); windowSection.Invalidate(); }, () => S.money >= cost).style.width = 220;
+                    }
+                    else K.Text(row, "Map edge", "dim");
+                }
+            }
+        }
+
+        string StaffState(StaffMember m)
+        {
+            if (!Sim.HasDesk(m)) return "No desk on this shift!";
+            if (m.state == "off" || !Sim.OnShift(m)) return "Off shift";
+            if (m.role == "Security") return "On patrol";
+            string tired = m.fatigue > 60 ? " (tired)" : "";
+            string where = m.floor > 0 ? $" [F{m.floor + 1}]" : "";
+            switch (m.state)
+            {
+                case "idle": return "Idle at desk" + tired;
+                case "walking": return $"Walking to #{m.taskObj}{where}" + tired;
+                case "working": return (m.taskTicket >= 0 ? $"Ticket at #{m.taskObj}" : $"Repairing #{m.taskObj}") + where + tired;
+                default: return "Returning" + tired;
+            }
+        }
+
+        // ---------------------------------------------------------------- log
+        void LogWindow(VisualElement p, Scope s)
+        {
+            var sv = K.Scroll(p);
+            for (int i = S.log.Count - 1; i >= 0 && i >= S.log.Count - 200; i--)
+            {
+                var e = S.log[i];
+                int d = e.hour / 24;
+                var row = K.Row(sv.contentContainer);
+                row.style.alignItems = Align.FlexStart;
+                K.Text(row, $"Y{d / 360 + 1} M{(d / 30) % 12 + 1:00} D{d % 30 + 1:00} {e.hour % 24:00}:00", "dim").style.width = 130;
+                var l = K.Text(row, e.text, "wrap", e.severity == 3 ? "bad" : e.severity == 2 ? "warn" : e.severity == 1 ? "good" : null);
+                l.style.flexShrink = 1;
+            }
+        }
+
+        // ---------------------------------------------------------------- goals
+        void GoalsWindow(VisualElement p, Scope s)
+        {
+            var sv = K.Scroll(p);
+            var c = sv.contentContainer;
+            var sc = Simulation.Scenario(S.scenario);
+            var card = K.Card(c);
+            K.Text(card, $"Scenario: {sc.name}", "bold");
+            K.Text(card, sc.goal, "wrap");
+            if (sc.id != "sandbox" && sc.id != "creative")
+            {
+                K.Bar(s, card, () => Sim.ScenarioProgress(out _), () => S.scenarioDone ? new Color(0.3f, 0.85f, 0.4f) : new Color(0.4f, 0.6f, 1f), () => { Sim.ScenarioProgress(out string t); return t; }, 18);
+                K.Text(s, card, () => S.scenarioDone ? "Scenario finished - endless mode." : $"Days left: {Mathf.Max(0, sc.days - S.Day)}", "dim");
+            }
+            var row = K.Row(c);
+            row.style.alignItems = Align.FlexStart;
+            var sc1 = K.Card(row);
+            sc1.style.width = 330;
+            K.Text(s, sc1, () => $"Score: {Sim.Score:N0}", "header");
+            K.Text(s, sc1, () => $"Lifetime revenue {K.Money(S.lifetimeRevenue)}", "small");
+            K.Text(s, sc1, () => $"Contracts completed {S.contractsCompleted}, failed {S.contractsFailed}", "small");
+            K.Text(s, sc1, () => $"Achievements {S.achievements.Count}/{Simulation.Achievements.Count}" + (S.creative ? " (disabled in Sandbox)" : ""), "small");
+            var ipo = K.Card(row);
+            ipo.style.flexGrow = 1;
+            K.Text(ipo, "Go public (IPO)", "bold");
+            K.Text(s, ipo, () => S.ipo ? "Your company is publicly traded." : Sim.CanIpo(out string why) ? "You qualify! An IPO raises a year of revenue in cash." : why, "wrap");
+            if (!S.ipo) K.Btn(s, ipo, () => "Ring the bell (IPO)", Sim.DoIpo, () => Sim.CanIpo(out _));
+
+            K.Text(c, "ACHIEVEMENTS", "section-title");
+            foreach (var a in Simulation.Achievements)
+            {
+                bool got = S.achievements.Contains(a.id), ever = Simulation.UnlockedEver(a.id);
+                var r = K.Row(c, "card");
+                K.Text(r, got ? "[*]" : ever ? "[o]" : "[ ]", got ? "good" : "dim").style.width = 30;
+                K.Text(r, a.name, got ? "bold" : null).style.width = 170;
+                K.Text(r, a.desc + (ever && !got ? "  (earned in another game)" : ""), "dim");
+            }
+        }
+
+        // ---------------------------------------------------------------- dashboard
+        void DashboardWindow(VisualElement p, Scope s)
+        {
+            K.Text(s, p, () => $"Last {S.dayStats.Count} days.   PUE {(Sim.itLoadKW > 0 ? (Sim.loadKW / Sim.itLoadKW).ToString("0.00") : "-")}   Solar now {Sim.solarKW:0}/{Sim.solarCapKW:0} kW   Grid price now ${Sim.PowerPriceNow:0.000}/kWh (+${S.city.carbonTax:0.000} carbon)", "dim");
+            var sv = K.Scroll(p);
+            var grid = K.Row(sv.contentContainer);
+            grid.style.alignItems = Align.FlexStart;
+            var left = K.Div(grid, "grow"); left.style.width = Length.Percent(50);
+            var right = K.Div(grid, "grow"); right.style.width = Length.Percent(50); right.style.marginLeft = 8;
+            void Chart(VisualElement col, string title, Func<DayStat, float> f, Color color, string fmt)
+            {
+                K.Text(col, title, "bold");
+                var ch = new LineChart { color = color, format = fmt, data = () => S.dayStats.Select(f).ToList() };
+                col.Add(ch);
+                s.Add(ch.Refresh);
+            }
+            Chart(left, "Cash", d => d.money, new Color(0.4f, 1f, 0.5f), "${0:N0}");
+            Chart(left, "Monthly recurring revenue", d => d.revenue, new Color(0.4f, 0.7f, 1f), "${0:N0}");
+            Chart(left, "Avg customer service level", d => d.uptime, new Color(1f, 0.85f, 0.3f), "{0:0.0}%");
+            Chart(right, "Facility load (all sites)", d => d.loadKW, new Color(1f, 0.6f, 0.3f), "{0:0} kW");
+            Chart(right, "Daily operating cost", d => d.cost, new Color(1f, 0.4f, 0.4f), "${0:N0}");
+            Chart(right, "Hottest hall", d => d.temp, new Color(1f, 0.5f, 0.2f), "{0:0.0} C");
+        }
+
+        // ---------------------------------------------------------------- sites
+        void SitesWindow(VisualElement p, Scope s)
+        {
+            var co = Sim.company;
+            var sv = K.Scroll(p);
+            var c = sv.contentContainer;
+            K.Text(c, "YOUR SITES", "section-title");
+            for (int i = 0; i < co.sims.Count; i++)
+            {
+                var site = co.sims[i];
+                var d = S.sites[i];
+                int idx = i;
+                var row = K.Row(c, "card");
+                var col = K.Div(row);
+                col.style.width = 230;
+                K.Text(col, (i == S.activeSite ? "> " : "") + d.name, "bold");
+                K.Text(col, $"{d.city.name} - {d.city.climate} - ${d.city.powerPrice:0.000}/kWh", "dim");
+                K.Text(s, row, () => $"{site.Racks.Count} racks\n{site.loadKW:0}/{site.availableKW:0} kW", "small").style.width = 110;
+                K.Text(s, row, () => $"Hot {(site.zones.Count > 0 ? site.zones.Max(z => z.temp) : 0):0.0}C\n{d.staff.Count} staff", "small").style.width = 90;
+                var stl = K.Text(s, row, () =>
+                {
+                    int down = site.racks.Values.Count(x => !x.online && !x.empty);
+                    int broken = d.objects.Count(o => o.failed || o.pduTripped) + d.objects.Sum(o => o.devices.Count(x => x.failed));
+                    return down > 0 || broken > 0 ? $"{down} racks down\n{broken} broken" : "All good";
+                }, "small");
+                stl.style.width = 110;
+                K.DynClass(s, stl, () => stl.text == "All good" ? "good" : "warn");
+                K.Flex(row);
+                if (i != S.activeSite) K.Btn(row, "Go to", () => { OpenWindow(Window.None); gm.SwitchSite(idx); }).style.width = 80;
+            }
+            K.Text(c, "EXPAND TO A NEW CITY", "section-title");
+            K.Text(c, $"Each site has its own climate, power prices, grid, land and staff. Contracts can use racks in any site, and geo-redundant customers require racks in at least two. Unlocks at reputation level {Company.MinLevelForSites}.", "dim");
+            foreach (var city in co.SiteCandidates())
+            {
+                var ct = city;
+                float cost = co.SiteCost(city);
+                var row = K.Row(c, "card");
+                var col = K.Div(row, "grow");
+                col.style.flexShrink = 1;
+                K.Text(col, $"{city.name}  ({city.climate})", "bold");
+                K.Text(col, $"Cooling x{city.coolingFactor:0.00}   Power ${city.powerPrice:0.000}/kWh{(city.carbonTax > 0 ? $" +${city.carbonTax:0.000} carbon" : "")}   Land x{city.landPrice:0.00}   Risk x{city.disasterRate:0.00}   Demand x{city.demandFactor:0.00}", "small", "wrap");
+                K.Text(col, city.blurb, "dim");
+                K.Btn(s, row, () => co.CanOpenSite(ct) ?? $"Open site {K.Money(cost)}",
+                    () => Confirm($"Buy land and open a data center in {ct.name} for {K.Money(cost)}?", () => { OpenWindow(Window.None); gm.OpenSite(ct); }),
+                    () => co.CanOpenSite(ct) == null).style.width = 210;
+            }
+        }
+
+        // ---------------------------------------------------------------- sandbox
+        void SandboxWindow(VisualElement p, Scope s)
+        {
+            var sv = K.Scroll(p);
+            var c = sv.contentContainer;
+            K.Text(c, "Creative mode: change the rules and poke the simulation. Achievements are disabled for this game.", "dim");
+            K.Text(c, "RULES", "section-title");
+            void Toggle(string label, Func<bool> get, Action<bool> set) => K.Btn(s, c, () => (get() ? "[x] " : "[ ] ") + label, () => set(!get()), null, get);
+            Toggle("Unlimited money", () => S.cheatInfiniteMoney, v => S.cheatInfiniteMoney = v);
+            Toggle("No hardware or facility failures", () => S.cheatNoFailures, v => S.cheatNoFailures = v);
+            Toggle("No random events", () => S.cheatNoEvents, v => S.cheatNoEvents = v);
+            Toggle("No bankruptcy", () => S.cheatNoBankruptcy, v => S.cheatNoBankruptcy = v);
+
+            K.Text(c, "MONEY & PROGRESSION", "section-title");
+            var m = K.Row(c);
+            K.Small(m, "+$100k", () => Sim.SandboxAddMoney(100_000));
+            K.Small(m, "+$1M", () => Sim.SandboxAddMoney(1_000_000));
+            K.Small(m, "+$10M", () => Sim.SandboxAddMoney(10_000_000));
+            K.Small(m, "Unlock all tech", Sim.SandboxUnlockAll);
+            var lv = K.Row(c);
+            K.Text(s, lv, () => $"Reputation level {S.Level}").style.width = 160;
+            K.Small(lv, "-1", () => Sim.SandboxSetLevel(S.Level - 1));
+            K.Small(lv, "+1", () => Sim.SandboxSetLevel(S.Level + 1));
+            K.Small(lv, "Max", () => Sim.SandboxSetLevel(Catalog.MaxLevel));
+            var rep = K.Row(c);
+            K.Text(s, rep, () => $"Rating {S.rating:0}").style.width = 160;
+            K.Small(rep, "-10", () => S.rating = Mathf.Max(0, S.rating - 10));
+            K.Small(rep, "+10", () => S.rating = Mathf.Min(100, S.rating + 10));
+
+            K.Text(c, "WORLD", "section-title");
+            var w = K.Row(c);
+            K.Small(w, "New contract offer", Sim.SandboxSpawnOffer);
+            K.Small(w, "Repair everything", Sim.SandboxRepairAll);
+            K.Small(w, "Skip 1 day", () => Sim.SandboxSkipDays(1));
+            K.Small(w, "Skip 7 days", () => Sim.SandboxSkipDays(7));
+            var wx = K.Row(c);
+            foreach (var weather in new[] { "Clear", "Cloudy", "Rain", "Storm", "Snow" })
+            {
+                var wv = weather;
+                K.Small(wx, wv, () => S.weather = wv);
+            }
+
+            K.Text(c, "TRIGGER EVENT", "section-title");
+            var ev = K.Row(c);
+            ev.style.flexWrap = Wrap.Wrap;
+            foreach (var e in Simulation.SandboxEvents)
+            {
+                var type = e;
+                K.Small(ev, type, () => Sim.SandboxTrigger(type)).style.width = 100;
+            }
+        }
+    }
+}

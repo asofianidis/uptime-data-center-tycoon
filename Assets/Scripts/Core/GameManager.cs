@@ -215,6 +215,13 @@ namespace DCT
             sim.S.tutorial = true; sim.S.tutorialStep = 2;
             sim.popups.Clear();
             yield return Shot("14_tutorial");
+            StartNewGame(4242, "Normal", "creative");
+            sim.popups.Clear();
+            AutoManager.BuildStarter(sim);
+            ui.OpenWindow(GameUI.Window.Sandbox);
+            yield return Shot("15_sandbox");
+            ui.OpenWindow(GameUI.Window.Settings);
+            yield return Shot("16_settings_new");
             Application.Quit();
         }
 

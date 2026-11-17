@@ -1,0 +1,102 @@
+/* Uptime - Data Center Tycoon UI theme */
+
+.root-layer { position: absolute; left: 0; top: 0; right: 0; bottom: 0; }
+
+.panel {
+    background-color: rgba(20, 26, 34, 0.96);
+    border-width: 1px;
+    border-color: rgb(64, 82, 102);
+    border-radius: 4px;
+    padding: 8px 10px;
+}
+.card {
+    background-color: rgba(12, 15, 20, 0.9);
+    border-width: 1px;
+    border-color: rgb(46, 56, 72);
+    border-radius: 3px;
+    padding: 6px 8px;
+    margin-top: 3px;
+    margin-bottom: 3px;
+    flex-shrink: 0;
+}
+.row { flex-direction: row; align-items: center; flex-shrink: 0; }
+.grow { flex-grow: 1; }
+.col { flex-direction: column; }
+
+.lbl { color: rgb(224, 230, 237); font-size: 13px; padding: 1px 2px; margin: 0; -unity-text-align: middle-left; white-space: nowrap; }
+.wrap { white-space: normal; }
+.small { font-size: 11px; }
+.dim { color: rgb(148, 161, 179); font-size: 11px; white-space: normal; }
+.bold { -unity-font-style: bold; }
+.header { font-size: 17px; -unity-font-style: bold; color: rgb(255, 255, 255); }
+.section-title { font-size: 10px; color: rgb(130, 145, 165); -unity-font-style: bold; margin-top: 8px; letter-spacing: 1px; }
+.good { color: rgb(102, 242, 128); }
+.bad { color: rgb(255, 107, 97); white-space: normal; }
+.warn { color: rgb(255, 199, 77); white-space: normal; }
+.money { font-size: 18px; -unity-font-style: bold; }
+.big-pay { font-size: 16px; -unity-font-style: bold; color: rgb(102, 242, 128); }
+.title { font-size: 52px; -unity-font-style: bold; color: white; -unity-text-align: middle-center; }
+.subtitle { font-size: 18px; color: rgb(128, 204, 255); -unity-text-align: middle-center; letter-spacing: 6px; }
+.center { -unity-text-align: middle-center; }
+
+.btn.unity-button {
+    background-color: rgb(43, 54, 69);
+    border-color: rgb(71, 89, 112);
+    border-width: 1px;
+    border-radius: 3px;
+    color: rgb(230, 237, 247);
+    font-size: 13px;
+    padding: 4px 8px;
+    margin: 2px;
+    -unity-text-align: middle-center;
+    white-space: nowrap;
+}
+.btn.unity-button:hover { background-color: rgb(61, 77, 99); border-color: rgb(102, 128, 158); }
+.btn.unity-button:active { background-color: rgb(31, 115, 191); }
+.btn.unity-button.on { background-color: rgb(31, 107, 179); border-color: rgb(89, 166, 242); color: white; }
+.btn.unity-button.on:hover { background-color: rgb(38, 128, 209); }
+.btn.unity-button:disabled { opacity: 0.4; }
+.btn-small.unity-button { font-size: 11px; padding: 2px 6px; margin: 1px 2px; }
+.btn-big.unity-button { font-size: 16px; height: 40px; }
+.btn.highlight.unity-button { border-color: rgb(255, 217, 51); border-width: 2px; }
+
+.swatch { border-radius: 2px; margin-right: 6px; flex-shrink: 0; }
+
+.bar-bg { background-color: rgba(8, 10, 13, 0.9); border-radius: 2px; flex-grow: 1; overflow: hidden; margin: 2px 0; }
+.bar-fill { height: 100%; border-radius: 2px; }
+.bar-text { position: absolute; left: 0; right: 0; top: 0; bottom: 0; -unity-text-align: middle-center; font-size: 11px; color: white; padding: 0; }
+
+.chip { background-color: rgba(128, 51, 38, 0.95); border-color: rgb(230, 102, 77); border-width: 1px; border-radius: 3px; color: white; font-size: 11px; padding: 1px 6px; margin: 0 3px; }
+.chip-info { background-color: rgba(38, 77, 128, 0.95); border-color: rgb(89, 140, 230); }
+
+.toast { background-color: rgba(8, 10, 15, 0.92); border-left-width: 4px; border-color: rgb(102, 179, 255); padding: 5px 8px; margin-top: 4px; color: white; font-size: 12px; white-space: normal; border-radius: 2px; }
+.toast-good { border-color: rgb(77, 255, 115); }
+.toast-warn { border-color: rgb(255, 191, 51); }
+.toast-bad { border-color: rgb(255, 77, 64); }
+
+.tooltip { background-color: rgba(8, 10, 15, 0.94); border-width: 1px; border-color: rgb(89, 115, 140); border-radius: 3px; padding: 5px 8px; color: white; font-size: 12px; white-space: normal; max-width: 440px; }
+.world-label { background-color: rgba(0, 0, 0, 0.55); border-left-width: 3px; color: white; font-size: 11px; padding: 2px 6px; border-radius: 2px; }
+
+.dimmer { position: absolute; left: 0; top: 0; right: 0; bottom: 0; background-color: rgba(0, 0, 0, 0.55); align-items: center; justify-content: center; }
+.modal { min-width: 420px; max-width: 760px; }
+
+.scroll { flex-grow: 1; }
+.scroll .unity-scroll-view__content-container { padding-right: 6px; }
+.unity-scroller--vertical { width: 10px; }
+.unity-scroller .unity-base-slider__tracker { background-color: rgba(30, 36, 46, 1); border-width: 0; }
+.unity-scroller .unity-base-slider__dragger { background-color: rgb(80, 98, 122); border-width: 0; border-radius: 4px; }
+.unity-scroller .unity-repeat-button { display: none; }
+
+.chart { height: 110px; background-color: rgba(0, 0, 0, 0.35); border-radius: 3px; margin: 2px 0 8px 0; flex-shrink: 0; }
+.chart-label { position: absolute; font-size: 10px; color: rgb(200, 210, 220); padding: 0 2px; }
+
+.topbar { flex-direction: row; align-items: center; padding: 4px 8px; }
+.stat-name { color: rgb(148, 161, 179); font-size: 11px; margin-left: 10px; }
+.stat-val { font-size: 13px; }
+
+.textfield .unity-text-field__input, .unity-text-field__input { background-color: rgb(14, 18, 24); color: white; border-color: rgb(71, 89, 112); font-size: 14px; }
+.unity-slider .unity-base-slider__tracker { background-color: rgb(30, 36, 46); }
+.unity-slider .unity-base-slider__dragger { background-color: rgb(89, 150, 230); border-width: 0; }
+
+.menu-bg { background-color: rgb(13, 18, 26); }
+.blink-led { position: absolute; width: 4px; height: 2px; }
