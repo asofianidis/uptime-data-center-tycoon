@@ -87,9 +87,9 @@ namespace DCT
             // Keep a technician per ~40 devices.
             int devices = S.objects.Sum(o => o.devices.Count);
             int want = Mathf.Clamp(devices / 40 + 1, 1, 12);
-            while (S.technicians < want && S.money > 20000)
+            while (S.staff.Count < want && S.money > 20000)
             {
-                if (sim.deskCount <= S.technicians && !TryPlaceAnywhere(sim, Catalog.Facility("desk"), out _)) break;
+                if (sim.deskCount <= S.staff.Count && !TryPlaceAnywhere(sim, Catalog.Facility("desk"), out _)) break;
                 if (sim.Hire() != null) break;
             }
         }
@@ -111,6 +111,13 @@ namespace DCT
             }
             if (sim.loadKW > sim.upsKW * 0.9f && S.money > 60000)
                 TryPlaceAnywhere(sim, Best(Catalog.Facilities.Where(f => f.kind == FacilityKind.Ups && sim.IsUnlocked(f.id)), f => f.cost / f.backupKW), out _);
+            if (sim.IsUnlocked("suppress") && S.money > 40000)
+                foreach (var z in sim.zones)
+                    if (!z.suppressed) { TryPlaceAnywhere(sim, Catalog.Facility("suppress"), out _); break; }
+            if (sim.IsUnlocked("solar") && sim.solarCapKW < sim.loadKW * 0.6f && S.money > 150000)
+                TryPlaceAnywhere(sim, Catalog.Facility("solar"), out _);
+            if (sim.ObjectsOfKind(FacilityKind.CoreSwitch).Count() < 2 && S.Level >= 3 && S.money > 60000)
+                TryPlaceAnywhere(sim, Catalog.Facility("core_10g"), out _);
             if (sim.IsUnlocked("gen") && sim.genKW < sim.loadKW && S.money > 70000)
                 TryPlaceAnywhere(sim, Catalog.Facility("gen"), out _);
             if (sim.bwDemand > sim.ispNominal * 0.7f && S.money > 30000)
@@ -249,6 +256,8 @@ namespace DCT
                 sim.AddDevice(rack, sw);
             }
             if (rack.linkCore < 0) sim.AutoConnect(rack);
+            var con = rack.contractId > 0 ? sim.FindContract(rack.contractId) : null;
+            if (con != null && con.redundant) sim.MakeRedundant(rack);
             foreach (var d in rack.devices.Where(x => x.failed).ToList())
                 if (sim.S.money > 50000) sim.ManualRepair(rack, d);
         }

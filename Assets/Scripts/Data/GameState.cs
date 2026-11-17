@@ -16,6 +16,8 @@ namespace DCT
         public float landPrice = 1f;       // multiplier on land expansion
         public float disasterRate = 1f;    // multiplier on bad event chance
         public float demandFactor = 1f;    // multiplier on contract pay
+        public float carbonTax;            // $ per grid kWh
+        public float solarFactor = 1f;     // sunniness
         public string blurb;
     }
 
@@ -27,6 +29,7 @@ namespace DCT
         public int u;            // lowest occupied slot (0-based)
         public bool failed;
         public int repairLeft;   // hours of technician work remaining
+        public int ageHours;
     }
 
     [Serializable]
@@ -39,6 +42,9 @@ namespace DCT
         public List<RackDevice> devices = new List<RackDevice>();
         public int contractId = -1;
         public int linkCore = -1;
+        public int linkCore2 = -1;     // redundant uplink
+        public bool dualPdu;           // redundant power feed
+        public bool pduTripped;
         public bool failed;
         public int repairLeft;
         public int placedOrder;
@@ -87,6 +93,65 @@ namespace DCT
         public bool isRenewal;
         public float earned;
         public string lastIssue;
+        public bool redundant;          // requires dual power, dual ToR, dual uplink on every rack
+        public float satisfaction = 70f;
+        public bool negotiated;
+        public bool referral;
+    }
+
+    [Serializable]
+    public class StaffMember
+    {
+        public int id;
+        public string name;
+        public string role;            // Technician, Electrician, NetEngineer, Security
+        public int skill = 1;          // 1..5
+        public float salary;
+        public float x, y;             // tile-space position
+        public float px, py;           // previous-hour position (for smooth rendering)
+        public string state = "idle";  // idle, walking, working
+        public int taskObj = -1, taskDev = -1, taskTicket = -1;
+        public float work;
+        public List<int> path = new List<int>();
+        public int hiredHour;
+    }
+
+    [Serializable]
+    public class Ticket
+    {
+        public int id;
+        public int contractId;
+        public string text;
+        public int createdHour, deadlineHour;
+        public float fee;
+        public float work = 2f;
+        public int rackId = -1;
+        public int assigned = -1;
+    }
+
+    [Serializable]
+    public class Rival
+    {
+        public string name;
+        public float reputation;
+        public float aggression;
+        public int customers;
+        public int colorIdx;
+    }
+
+    [Serializable]
+    public class DayStat
+    {
+        public int day;
+        public float money, revenue, cost, loadKW, solarKW, uptime, temp;
+    }
+
+    [Serializable]
+    public class Candidate
+    {
+        public string name, role;
+        public int skill;
+        public float salary;
     }
 
     [Serializable]
@@ -151,6 +216,24 @@ namespace DCT
         public int landPurchases;
         public bool gameOver;
         public int peakLevel = 1;
+
+        // ---- v2 systems ----
+        public List<StaffMember> staff = new List<StaffMember>();
+        public List<Candidate> candidates = new List<Candidate>();
+        public List<Ticket> tickets = new List<Ticket>();
+        public List<Rival> rivals = new List<Rival>();
+        public List<DayStat> dayStats = new List<DayStat>();
+        public List<string> achievements = new List<string>();
+        public string weather = "Clear";
+        public float hardwarePriceMul = 1f;
+        public float gpuPriceMul = 1f;
+        public float monthSolarKWh, monthGridKWh;
+        public float lastSolarShare;
+        public string scenario = "sandbox";
+        public bool scenarioDone;
+        public bool ipo;
+        public int ticketsDone, ticketsMissed, firesFought, outagesSurvived;
+        public float peakMonthlyRevenue;
 
         public int Day => hour / Catalog.HoursPerDay;
         public int Month => Day / Catalog.DaysPerMonth;

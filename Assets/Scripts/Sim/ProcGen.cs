@@ -114,17 +114,18 @@ namespace DCT
 
         static Industry PickIndustry(System.Random r) => Pick(r, Industries);
 
-        static ContractType PickType(System.Random r, Industry ind, int level)
+        static ContractType PickType(System.Random r, Industry ind, int level, bool aiBoom)
         {
             float[] w = (float[])ind.typeWeights.Clone();
             if (level < 5) w[4] = 0f;              // GPU contracts need GPU hardware
+            if (aiBoom) w[4] = (w[4] + 1f) * 4f;
             float total = 0; foreach (var x in w) total += x;
             float roll = (float)r.NextDouble() * total;
             for (int i = 0; i < w.Length; i++) { roll -= w[i]; if (roll <= 0) return (ContractType)i; }
             return ContractType.Compute;
         }
 
-        static readonly string[] TraitPool = { "Rush", "Budget", "Premium", "Long-term", "Growing", "Flexible", "Strict" };
+        static readonly string[] TraitPool = { "Rush", "Budget", "Premium", "Long-term", "Growing", "Flexible", "Strict", "Eco" };
 
         public static string TraitDesc(string t)
         {
@@ -138,6 +139,9 @@ namespace DCT
                 case "Flexible": return "Generous setup window.";
                 case "Strict": return "Will cancel after 2 SLA breaches instead of 3.";
                 case "Renewal": return "Returning customer.";
+                case "Eco": return "Wants 25%+ of your energy from solar each month; pays 10% more.";
+                case "Referral": return "Referred by a happy customer; pays 12% more.";
+                case "Redundant": return "Every rack needs dual PDU, two ToR switches and two core uplinks; pays 35% more.";
             }
             return t;
         }
@@ -154,7 +158,7 @@ namespace DCT
                 colorIdx = r.Next(Catalog.CustomerColors.Length),
                 status = ContractStatus.Offer,
             };
-            c.type = PickType(r, ind, level);
+            c.type = PickType(r, ind, level, s.scenario == "aiboom");
             float scale = (1f + (level - 1) * 0.65f) * Range(r, 0.6f, 1.4f);
             float pay = 0f;
 
@@ -228,6 +232,7 @@ namespace DCT
             {
                 string t = Pick(r, TraitPool);
                 if (c.traits.Contains(t)) continue;
+                if (t == "Eco" && level < 3 && s.scenario != "green") continue;
                 if ((t == "Budget" && c.traits.Contains("Premium")) || (t == "Premium" && c.traits.Contains("Budget"))) continue;
                 if ((t == "Rush" && c.traits.Contains("Flexible")) || (t == "Flexible" && c.traits.Contains("Rush"))) continue;
                 c.traits.Add(t);
@@ -238,9 +243,18 @@ namespace DCT
                     case "Premium": traitMul *= 1.2f; if (c.sla < 99.9f) c.sla = 99.9f; break;
                     case "Long-term": c.months *= 2; traitMul *= 0.95f; break;
                     case "Flexible": c.setupDays += 10; break;
+                    case "Eco": traitMul *= 1.1f; break;
                 }
             }
 
+            if (s.scenario == "green" && !c.traits.Contains("Eco") && Chance(r, 0.5)) { c.traits.Add("Eco"); traitMul *= 1.1f; }
+            if (level >= 3 && c.sla >= 99.9f && Chance(r, 0.35))
+            {
+                c.redundant = true;
+                c.traits.Add("Redundant");
+                traitMul *= 1.35f;
+            }
+            foreach (var e in s.events) if (e.type == "pricewar") traitMul *= e.magnitude;
             c.reqBandwidth = Mathf.Max(0.5f, Mathf.Round(c.reqBandwidth * 2f) / 2f);
             float ratingMul = 0.8f + s.rating / 250f;
             pay *= slaMul * traitMul * ratingMul * s.city.demandFactor * Range(r, 0.85f, 1.2f);

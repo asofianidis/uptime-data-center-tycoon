@@ -5,9 +5,10 @@ namespace DCT
 {
     public enum RoomType { None = 0, Corridor = 1, ServerHall = 2, Network = 3, Power = 4, Office = 5, Outdoor = 99 }
     public enum DeviceKind { Server, Switch }
-    public enum FacilityKind { Rack, Cooling, CoreSwitch, Isp, Transformer, Switchgear, Ups, Generator, Desk }
+    public enum FacilityKind { Rack, Cooling, CoreSwitch, Isp, Transformer, Switchgear, Ups, Generator, Desk, Solar, Suppression }
 
     /// <summary>Rack-mountable equipment (servers and top-of-rack switches).</summary>
+    [System.Serializable]
     public class DeviceDef
     {
         public string id, name, desc;
@@ -26,6 +27,7 @@ namespace DCT
     }
 
     /// <summary>Floor-standing facility equipment.</summary>
+    [System.Serializable]
     public class FacilityDef
     {
         public string id, name, desc;
@@ -44,6 +46,7 @@ namespace DCT
         public int rackU;
         public float rackKW;       // rack PDU limit
         public int staff;
+        public string model;       // optional Resources/Models prefab (Blender asset)
         public int level = 1;
         public float research;
         public Color color = Color.gray;
@@ -150,22 +153,56 @@ namespace DCT
             new FacilityDef { id = "gen_big", name = "Turbine Generator", kind = FacilityKind.Generator, room = RoomType.Outdoor, w = 2, h = 2, cost = 200000, backupKW = 1500, level = 6, research = 150000,
                 desc = "1.5 MW gas turbine.", color = new Color(0.85f, 0.6f, 0.15f) },
 
+            // ---- Energy & safety ----
+            new FacilityDef { id = "solar", name = "Solar Array", kind = FacilityKind.Solar, room = RoomType.Outdoor, w = 2, h = 2, cost = 35000, supplyKW = 60, level = 3, research = 25000,
+                desc = "Generates up to 60 kW in full sun, cutting your grid bill and carbon tax. Output follows the sun and weather.", color = new Color(0.15f, 0.25f, 0.5f) },
+            new FacilityDef { id = "solar_big", name = "Solar Farm Block", kind = FacilityKind.Solar, room = RoomType.Outdoor, w = 3, h = 3, cost = 110000, supplyKW = 220, level = 6, research = 90000,
+                desc = "High-efficiency bifacial panels, up to 220 kW.", color = new Color(0.12f, 0.2f, 0.45f) },
+            new FacilityDef { id = "suppress", name = "Fire Suppression System", kind = FacilityKind.Suppression, room = RoomType.ServerHall, cost = 12000, watts = 100, level = 2, research = 8000,
+                desc = "Inert-gas suppression for its whole server hall: fires are put out before they destroy hardware.", color = new Color(0.85f, 0.15f, 0.12f) },
+
             // ---- Office ----
             new FacilityDef { id = "desk", name = "Technician Desk", kind = FacilityKind.Desk, room = RoomType.Office, cost = 1500, watts = 300, staff = 1, level = 1,
                 desc = "Workspace for one technician. Technicians repair failed hardware automatically.", color = new Color(0.55f, 0.4f, 0.28f) },
         };
+
+        [System.Serializable]
+        public class CatalogData { public List<DeviceDef> devices = new List<DeviceDef>(); public List<FacilityDef> facilities = new List<FacilityDef>(); }
+
+        static bool loadedData;
+
+        /// <summary>Loads Resources/Data/catalog.json if present so equipment can be rebalanced without code changes.</summary>
+        public static void EnsureLoaded()
+        {
+            if (loadedData) return;
+            loadedData = true;
+            var ta = Resources.Load<TextAsset>("Data/catalog");
+            if (ta == null) return;
+            try
+            {
+                var data = JsonUtility.FromJson<CatalogData>(ta.text);
+                if (data != null && data.devices != null && data.devices.Count > 0) { Devices.Clear(); Devices.AddRange(data.devices); }
+                if (data != null && data.facilities != null && data.facilities.Count > 0) { Facilities.Clear(); Facilities.AddRange(data.facilities); }
+                deviceMap = null; facilityMap = null;
+            }
+            catch (System.Exception e) { Debug.LogWarning("catalog.json failed to load: " + e.Message); }
+        }
+
+        public static string ExportJson() => JsonUtility.ToJson(new CatalogData { devices = Devices, facilities = Facilities }, true);
 
         static Dictionary<string, DeviceDef> deviceMap;
         static Dictionary<string, FacilityDef> facilityMap;
 
         public static DeviceDef Device(string id)
         {
+            EnsureLoaded();
             if (deviceMap == null) { deviceMap = new Dictionary<string, DeviceDef>(); foreach (var d in Devices) deviceMap[d.id] = d; }
             return id != null && deviceMap.TryGetValue(id, out var r) ? r : null;
         }
 
         public static FacilityDef Facility(string id)
         {
+            EnsureLoaded();
             if (facilityMap == null) { facilityMap = new Dictionary<string, FacilityDef>(); foreach (var d in Facilities) facilityMap[d.id] = d; }
             return id != null && facilityMap.TryGetValue(id, out var r) ? r : null;
         }
@@ -211,6 +248,8 @@ namespace DCT
                 case FacilityKind.Ups: return "UPS";
                 case FacilityKind.Generator: return "Generators";
                 case FacilityKind.Desk: return "Office";
+                case FacilityKind.Solar: return "Solar";
+                case FacilityKind.Suppression: return "Fire Safety";
             }
             return k.ToString();
         }

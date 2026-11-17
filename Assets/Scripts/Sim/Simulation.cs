@@ -18,6 +18,10 @@ namespace DCT
         public int zone = -1;
         public bool empty;
         public bool colo;
+        public float airflow = 1f;
+        public string airflowNote;
+        public bool redundant;
+        public bool degraded;      // running on one path of a redundant pair
     }
 
     public class ZoneInfo
@@ -26,6 +30,7 @@ namespace DCT
         public List<int> tiles = new List<int>();
         public float heatKW, coolKW, temp = 21f;
         public Vector2 center;
+        public bool suppressed;
     }
 
     public class Provision
@@ -44,7 +49,7 @@ namespace DCT
         public Popup Add(string label, Action a) { options.Add(new KeyValuePair<string, Action>(label, a)); return this; }
     }
 
-    public class Simulation
+    public partial class Simulation
     {
         public GameState S;
         public System.Random rng;
@@ -78,13 +83,17 @@ namespace DCT
             S = state;
             rng = new System.Random(state.seed * 7919 + state.hour);
             RebuildIndex();
+            EnsureRivals();
             Recompute();
+            if (S.candidates.Count == 0) RefreshCandidates();
         }
 
         // =====================================================================
         //  New game
         // =====================================================================
-        public static GameState NewGame(int seed, string difficulty)
+        public static GameState NewGame(int seed, string difficulty) => NewGame(seed, difficulty, "sandbox");
+
+        public static GameState NewGame(int seed, string difficulty, string scenario)
         {
             var r = new System.Random(seed);
             var s = new GameState { seed = seed, difficulty = difficulty };
@@ -94,6 +103,10 @@ namespace DCT
             s.rating = difficulty == "Hard" ? 40 : 50;
             s.hour = 8;
             s.nextOfferHour = s.hour + 24;
+            s.scenario = scenario ?? "sandbox";
+            s.city.carbonTax = r.NextDouble() < 0.4 ? (float)Math.Round(ProcGen.Range(r, 0.005f, 0.03f), 3) : 0f;
+            s.city.solarFactor = s.city.climate == "Desert" ? 1.3f : s.city.climate == "Hot" ? 1.15f : s.city.climate == "Arctic" ? 0.6f : s.city.climate == "Cold" ? 0.8f : 1f;
+            ApplyScenario(s);
             for (int i = 0; i < 3; i++) s.offers.Add(ProcGen.GenerateContract(s, r));
             s.current.month = 0;
             s.log.Add(new LogEntry { hour = s.hour, text = $"Welcome to {s.city.name}! {s.city.blurb}", severity = 1 });
@@ -253,6 +266,10 @@ namespace DCT
                     case FacilityKind.Isp: ispNominal += d.bandwidth; break;
                     case FacilityKind.CoreSwitch: corePorts += d.ports; break;
                     case FacilityKind.Desk: deskCount += d.staff; break;
+                    case FacilityKind.Suppression:
+                        int sz = ZoneAt(o);
+                        if (sz >= 0) zones[sz].suppressed = true;
+                        break;
                     case FacilityKind.Cooling:
                         int zi = ZoneAt(o);
                         if (zi >= 0) zones[zi].coolKW += d.coolingKW * heatMul;
@@ -261,6 +278,7 @@ namespace DCT
                 }
             }
             supplyKW = Mathf.Min(transformerKW, switchgearKW);
+            ComputeSolar();
             outageActive = EventActive("outage");
             outageLong = outageActive && EventMag("outage", 0) > 0.5f;
             availableKW = outageActive ? (outageLong ? Mathf.Min(upsKW, genKW) : upsKW) : supplyKW;
@@ -268,7 +286,10 @@ namespace DCT
 
             coreUsage.Clear();
             foreach (var o in Racks)
+            {
                 if (o.linkCore > 0) coreUsage[o.linkCore] = (coreUsage.TryGetValue(o.linkCore, out int u) ? u : 0) + 1;
+                if (o.linkCore2 > 0) coreUsage[o.linkCore2] = (coreUsage.TryGetValue(o.linkCore2, out int u2) ? u2 : 0) + 1;
+            }
             corePortsUsed = coreUsage.Values.Sum();
 
             // ---- Per-rack evaluation ----
@@ -299,20 +320,26 @@ namespace DCT
                 info.empty = o.devices.Count == 0 && !info.colo;
                 info.drawing = true;
 
-                PlacedObject core = o.linkCore > 0 && objById.TryGetValue(o.linkCore, out var cc) ? cc : null;
-                var coreDef = core != null ? Catalog.Facility(core.def) : null;
+                bool ok1 = CoreOk(o.linkCore, out var cd1, out string coreIssue);
+                bool ok2 = CoreOk(o.linkCore2, out var cd2, out _);
+                bool anyCore = ok1 || ok2;
+                bool hasSecond = o.linkCore2 > 0;
 
                 if (info.empty) info.issue = "Empty rack";
                 else if (info.loadKW > d.rackKW) { info.issue = $"PDU overloaded ({info.loadKW:0.0}/{d.rackKW:0} kW)"; info.drawing = false; }
+                else if (o.pduTripped && !o.dualPdu) { info.issue = "PDU tripped - waiting for an electrician"; info.drawing = false; }
                 else if (info.zone >= 0 && zones[info.zone].temp >= 45f) { info.issue = "Thermal shutdown"; info.drawing = false; }
                 else if (info.switches == 0) info.issue = info.failedDevices > 0 && o.devices.Any(x => x.failed && Catalog.Device(x.def)?.kind == DeviceKind.Switch) ? "ToR switch failed" : "No ToR switch";
-                else if (core == null || coreDef == null) info.issue = "Not cabled to a core switch";
-                else if (core.failed) info.issue = "Core switch failed";
-                else if (S.Room(core.x, core.y) != RoomType.Network) info.issue = "Core switch outside network room";
+                else if (!anyCore) info.issue = hasSecond ? "Both core uplinks down" : coreIssue;
                 else if (ispGbps <= 0) info.issue = ispNominal > 0 ? "ISP fiber cut" : "No ISP uplink";
                 else info.issue = null;
 
-                if (coreDef != null) info.linkGbps = Mathf.Min(bestUplink, coreDef.portGbps);
+                float port = Mathf.Max(ok1 ? cd1.portGbps : 0, ok2 ? cd2.portGbps : 0);
+                info.linkGbps = Mathf.Min(bestUplink, port);
+                info.redundant = o.dualPdu && info.switches >= 2 && ok1 && ok2 && o.linkCore != o.linkCore2;
+                int swTotal = o.devices.Count(x => Catalog.Device(x.def)?.kind == DeviceKind.Switch);
+                info.degraded = (o.pduTripped && o.dualPdu) || (hasSecond && (ok1 != ok2)) || (swTotal >= 2 && info.switches == 1);
+                info.airflow = AirflowFactor(o, out info.airflowNote);
                 if (info.drawing) rackLoad += info.loadKW;
             }
 
@@ -339,7 +366,7 @@ namespace DCT
             foreach (var o in rackList)
             {
                 var info = racks[o.id];
-                if (info.drawing && info.zone >= 0) { zones[info.zone].heatKW += info.loadKW; heatKW += info.loadKW; }
+                if (info.drawing && info.zone >= 0) { zones[info.zone].heatKW += info.loadKW * info.airflow; heatKW += info.loadKW * info.airflow; }
                 info.online = info.drawing && info.issue == null;
 
                 // Count usable servers (limited by switch ports).
@@ -379,13 +406,14 @@ namespace DCT
         {
             var p = new Provision();
             string rackIssue = null;
-            int assigned = 0;
+            int assigned = 0, nonRedundant = 0;
             foreach (var o in rackList)
             {
                 if (o.contractId != c.id) continue;
                 assigned++;
                 var info = racks[o.id];
                 if (!info.online) { rackIssue ??= info.issue; continue; }
+                if (c.redundant && !info.redundant) nonRedundant++;
                 p.racks++;
                 p.bandwidth += info.linkGbps;
                 p.cores += info.cores; p.storage += info.storage; p.gpus += info.gpus;
@@ -426,6 +454,11 @@ namespace DCT
             }
             if (need == null && p.bandwidth + 0.001f < c.reqBandwidth)
                 need = netQuality < 1f ? $"ISP saturated: {p.bandwidth:0.0}/{c.reqBandwidth:0.0} Gbps" : $"Needs {c.reqBandwidth:0.0} Gbps uplink (has {p.bandwidth:0.0})";
+            if (need == null && c.redundant && nonRedundant > 0)
+            {
+                need = $"Redundancy required: {nonRedundant} rack(s) lack dual PDU / 2 ToR / 2 core uplinks";
+                p.service = Mathf.Min(p.service, 0.97f);
+            }
             if (need != null && assigned == 0) need = "No racks assigned";
             else if (need != null && rackIssue != null) need += $" - rack issue: {rackIssue}";
             p.meets = need == null;
@@ -444,14 +477,16 @@ namespace DCT
             {
                 if (S.hour < e.endHour) return false;
                 Log($"{e.label} has ended.", 1);
+                OnEventEnded(e);
                 return true;
             });
 
             UpdateTemperatures();
             Recompute();
             RollFailures();
-            DoRepairs();
+            StaffTick();
             UpdateContracts();
+            HourExtras();
             UpdateFinances();
             if (S.hour % Catalog.HoursPerDay == 0) DailyTick();
             CheckLevel();
@@ -488,12 +523,18 @@ namespace DCT
                 if (d.kind == FacilityKind.Rack)
                 {
                     if (racks.TryGetValue(o.id, out var info) && !info.drawing) continue;
+                    if (!o.pduTripped && o.devices.Count > 0 && rng.NextDouble() < 0.0007f / 24f * mul)
+                    {
+                        o.pduTripped = true;
+                        MarkDirty(o);
+                        Log(o.dualPdu ? $"PDU A tripped in rack #{o.id} - running on feed B." : $"PDU tripped in rack #{o.id}! Rack is down.", o.dualPdu ? 2 : 3);
+                    }
                     foreach (var dev in o.devices)
                     {
                         if (dev.failed) continue;
                         var dd = Catalog.Device(dev.def);
                         float daily = dd.kind == DeviceKind.Switch ? 0.0006f : 0.0011f;
-                        if (rng.NextDouble() < daily / 24f * tempFactor * mul)
+                        if (rng.NextDouble() < daily / 24f * tempFactor * mul * AgeFailureFactor(dev))
                         {
                             dev.failed = true;
                             dev.repairLeft = 4;
@@ -502,7 +543,7 @@ namespace DCT
                         }
                     }
                 }
-                else if (!o.failed && d.kind != FacilityKind.Desk && d.kind != FacilityKind.Ups)
+                else if (!o.failed && d.kind != FacilityKind.Desk && d.kind != FacilityKind.Ups && d.kind != FacilityKind.Suppression)
                 {
                     if (rng.NextDouble() < 0.0005f / 24f * mul)
                     {
@@ -515,7 +556,6 @@ namespace DCT
             }
         }
 
-        public int EffectiveTechs => Mathf.Min(S.technicians, deskCount);
 
         void DoRepairs()
         {
@@ -566,7 +606,7 @@ namespace DCT
         {
             float cost = ManualRepairCost(o, dev);
             if (!Spend(cost, false)) return "Not enough money";
-            if (dev != null) dev.failed = false; else o.failed = false;
+            if (dev != null) dev.failed = false; else { o.failed = false; o.pduTripped = false; }
             MarkDirty(o);
             Recompute();
             return null;
@@ -612,6 +652,7 @@ namespace DCT
                     c.lastIssue = p?.issue;
                     c.monthHours++; c.totalHours++;
                     c.service = p != null ? p.service : 0f;
+                    SatisfactionHour(c, meets);
                     // Partial capacity counts as partial downtime; a total outage counts as a full hour.
                     if (!meets) { float down = 1f - c.service; c.monthDown += down; c.totalDown += down; }
                     float inc = c.monthlyPay / Catalog.HoursPerMonth;
@@ -645,6 +686,7 @@ namespace DCT
                 S.money -= credit;
                 S.current.penalties += credit;
                 S.rating = Mathf.Max(0, S.rating - 3);
+                c.satisfaction = Mathf.Max(0, c.satisfaction - 12);
                 c.breaches++;
                 int maxBreaches = c.traits.Contains("Strict") ? 2 : 3;
                 Log($"SLA breach for {c.customer}: {uptime:0.00}% uptime vs {c.sla}% SLA. ${credit:N0} service credit.", 3);
@@ -661,7 +703,9 @@ namespace DCT
             {
                 S.xp += MonthXp(c);
                 S.rating = Mathf.Min(100, S.rating + 1.2f);
+                c.satisfaction = Mathf.Min(100, c.satisfaction + 2);
             }
+            EcoCheck(c);
             c.monthHours = 0; c.monthDown = 0;
 
             if (c.monthsServed >= c.months)
@@ -673,7 +717,8 @@ namespace DCT
                 EndContract(c, ContractStatus.Completed);
                 Log($"Contract with {c.customer} completed successfully! (+reputation)", 1);
                 float overall = Uptime(c, false);
-                if (overall >= c.sla - 0.5f && rng.NextDouble() < 0.6)
+                if (c.satisfaction > 75) GenerateReferral(c);
+                if (overall >= c.sla - 0.5f && rng.NextDouble() < 0.2 + c.satisfaction / 125f)
                 {
                     int extra = rng.Next(4, 10);
                     float newPay = Mathf.Round(c.monthlyPay * ProcGen.Range(rng, 1.05f, 1.2f) / 50f) * 50f;
@@ -709,10 +754,11 @@ namespace DCT
 
         void UpdateFinances()
         {
-            float powerCost = loadKW * S.city.powerPrice * EventMag("powerspike", 1f);
+            float grid = Mathf.Max(0, loadKW - solarKW);
+            float powerCost = grid * (PowerPriceNow + S.city.carbonTax);
             float netCost = 0;
             foreach (var o in ObjectsOfKind(FacilityKind.Isp)) netCost += Catalog.Facility(o.def).monthly / Catalog.HoursPerMonth;
-            float salaries = S.technicians * Catalog.TechSalary / Catalog.HoursPerMonth;
+            float salaries = (S.technicians * Catalog.TechSalary + S.staff.Sum(m => m.salary)) / Catalog.HoursPerMonth;
             S.money -= powerCost + netCost + salaries;
             S.current.power += powerCost;
             S.current.network += netCost;
@@ -750,9 +796,11 @@ namespace DCT
             }
 
             RollEvents();
+            DailyExtras();
 
             if (S.Day % Catalog.DaysPerMonth == 0)
             {
+                MonthlyExtras();
                 S.current.month = S.Month - 1;
                 S.reports.Add(S.current);
                 if (S.reports.Count > 36) S.reports.RemoveAt(0);
@@ -779,6 +827,14 @@ namespace DCT
                     new KeyValuePair<string, float>("fibercut", ispNominal > 0 ? 1f : 0f),
                     new KeyValuePair<string, float>("recall", Racks.Sum(r => r.devices.Count) > 8 ? 0.8f : 0f),
                     new KeyValuePair<string, float>("surge", bwDemand > 0 ? 1f : 0f),
+                    new KeyValuePair<string, float>("fire", Racks.Any(r => r.devices.Count > 0) ? 0.45f : 0f),
+                    new KeyValuePair<string, float>("leak", ObjectsOfKind(FacilityKind.Cooling).Any() ? 0.5f : 0f),
+                    new KeyValuePair<string, float>("ddos", S.contracts.Any(c => c.status == ContractStatus.Active) ? 0.8f : 0f),
+                    new KeyValuePair<string, float>("shortage", 0.5f),
+                    new KeyValuePair<string, float>("bankrupt", S.contracts.Count(c => c.status == ContractStatus.Active) >= 3 ? 0.3f : 0f),
+                    new KeyValuePair<string, float>("regulation", 0.2f),
+                    new KeyValuePair<string, float>("pricewar", 0.4f),
+                    new KeyValuePair<string, float>("breakin", Racks.Any(r => r.devices.Count > 0) ? 0.35f : 0f),
                 };
                 string pick = WeightedPick(opts);
                 if (pick != null && !EventActive(pick)) TriggerEvent(pick);
@@ -902,6 +958,9 @@ namespace DCT
                     }).Add("Decline", () => { c.expanded = true; }));
                     break;
                 }
+                default:
+                    TriggerExtraEvent(type);
+                    break;
             }
             Recompute();
         }
@@ -946,6 +1005,7 @@ namespace DCT
                     n++; cost += Catalog.FoundationCost;
                 }
             if (!apply || n == 0) return n;
+            Checkpoint();
             if (!Spend(cost)) { Log("Not enough money to build that.", 2); return 0; }
             for (int y = r.yMin; y < r.yMax; y++)
                 for (int x = r.xMin; x < r.xMax; x++)
@@ -976,6 +1036,7 @@ namespace DCT
             n = tiles.Count;
             cost = t == RoomType.Corridor ? 0 : n * Catalog.RoomPaintCost;
             if (!apply || n == 0) return n;
+            Checkpoint();
             if (!Spend(cost)) { Log("Not enough money.", 2); return 0; }
             foreach (var i in tiles) S.rooms[i] = (int)t;
             TilesChanged();
@@ -986,6 +1047,7 @@ namespace DCT
         public int Demolish(RectInt r, bool apply, out float cost, out string what)
         {
             cost = 0; what = "";
+            if (apply) Checkpoint();
             var objs = new HashSet<PlacedObject>();
             int rooms = 0, floors = 0, obst = 0;
             float obstCost = 0;
@@ -1087,6 +1149,7 @@ namespace DCT
         public PlacedObject Place(FacilityDef d, int x, int y, int rot)
         {
             if (CanPlace(d, x, y, rot) != null) return null;
+            Checkpoint();
             Spend(d.cost);
             var o = new PlacedObject { id = S.NewId(), def = d.id, x = x, y = y, rot = rot, placedOrder = ++placeCounter };
             S.objects.Add(o);
@@ -1100,17 +1163,24 @@ namespace DCT
         public float RemovalRefund(PlacedObject o)
         {
             float v = Catalog.Facility(o.def).cost * 0.5f;
-            foreach (var d in o.devices) v += Catalog.Device(d.def).cost * 0.5f;
+            foreach (var d in o.devices) v += ResaleValue(d);
+            if (o.dualPdu) v += DualPduCost * 0.5f;
             return v;
         }
 
         public void RemoveObject(PlacedObject o)
         {
+            Checkpoint();
             Refund(RemovalRefund(o));
             MarkOccupancy(o, 0);
             S.objects.Remove(o);
             objById.Remove(o.id);
-            foreach (var r in Racks) if (r.linkCore == o.id) { r.linkCore = -1; MarkDirty(r); }
+            foreach (var r in Racks)
+            {
+                if (r.linkCore == o.id) { r.linkCore = -1; MarkDirty(r); }
+                if (r.linkCore2 == o.id) { r.linkCore2 = -1; MarkDirty(r); }
+            }
+            foreach (var m in S.staff) if (m.taskObj == o.id) { m.taskObj = -1; m.state = "returning"; m.path = null; }
             objectsVersion++;
             Recompute();
         }
@@ -1142,15 +1212,16 @@ namespace DCT
             var c = rack.contractId > 0 ? FindContract(rack.contractId) : null;
             if (c != null && c.type == ContractType.Colocation && d.kind == DeviceKind.Server) return "Colocation customers bring their own servers";
             if (FindSlot(rack, d.heightU) < 0) return "Not enough free rack units";
-            if (S.money < d.cost) return "Not enough money";
+            if (S.money < DeviceCost(d)) return "Not enough money";
             return null;
         }
 
         public RackDevice AddDevice(PlacedObject rack, DeviceDef d)
         {
             if (CanAddDevice(rack, d) != null) return null;
+            Checkpoint();
             int u = FindSlot(rack, d.heightU);
-            Spend(d.cost);
+            Spend(DeviceCost(d));
             var dev = new RackDevice { id = S.NewId(), def = d.id, u = u };
             rack.devices.Add(dev);
             MarkDirty(rack);
@@ -1167,8 +1238,9 @@ namespace DCT
 
         public void RemoveDevice(PlacedObject rack, RackDevice dev)
         {
+            Checkpoint();
             if (!rack.devices.Remove(dev)) return;
-            Refund(Catalog.Device(dev.def).cost * 0.5f);
+            Refund(ResaleValue(dev));
             MarkDirty(rack);
             Recompute();
         }
@@ -1189,6 +1261,7 @@ namespace DCT
         {
             if (rack.linkCore == core.id) return "Already connected";
             if (FreePorts(core) <= 0) return "Core switch has no free ports";
+            Checkpoint();
             float cost = CableCost(rack, core);
             if (!Spend(cost)) return "Not enough money";
             rack.linkCore = core.id;
@@ -1227,6 +1300,7 @@ namespace DCT
 
         public string Assign(PlacedObject rack, Contract c)
         {
+            Checkpoint();
             if (c == null) { rack.contractId = -1; MarkDirty(rack); Recompute(); return null; }
             if (c.status != ContractStatus.Setup && c.status != ContractStatus.Active) return "Contract is not active";
             if (c.type == ContractType.Colocation && rack.devices.Any(d => Catalog.Device(d.def).kind == DeviceKind.Server))
@@ -1284,7 +1358,7 @@ namespace DCT
             return null;
         }
 
-        public string Hire()
+        string LegacyHire()
         {
             if (S.technicians >= deskCount) return "Build more technician desks in an Office first";
             if (!Spend(1000, false)) return "Not enough money";
@@ -1293,7 +1367,7 @@ namespace DCT
             return null;
         }
 
-        public void Fire()
+        void LegacyFire()
         {
             if (S.technicians > 0) { S.technicians--; Log("Let a technician go.", 0); }
         }

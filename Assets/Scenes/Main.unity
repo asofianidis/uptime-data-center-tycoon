@@ -119,7 +119,7 @@ NavMeshSettings:
     debug:
       m_Flags: 0
   m_NavMeshData: {fileID: 0}
---- !u!1 &761284772
+--- !u!1 &269548270
 GameObject:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
@@ -127,9 +127,9 @@ GameObject:
   m_PrefabAsset: {fileID: 0}
   serializedVersion: 6
   m_Component:
-  - component: {fileID: 761284775}
-  - component: {fileID: 761284774}
-  - component: {fileID: 761284773}
+  - component: {fileID: 269548273}
+  - component: {fileID: 269548272}
+  - component: {fileID: 269548271}
   m_Layer: 0
   m_Name: Main Camera
   m_TagString: MainCamera
@@ -137,21 +137,21 @@ GameObject:
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
   m_IsActive: 1
---- !u!81 &761284773
+--- !u!81 &269548271
 AudioListener:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 761284772}
+  m_GameObject: {fileID: 269548270}
   m_Enabled: 1
---- !u!20 &761284774
+--- !u!20 &269548272
 Camera:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 761284772}
+  m_GameObject: {fileID: 269548270}
   m_Enabled: 1
   serializedVersion: 2
   m_ClearFlags: 1
@@ -196,13 +196,13 @@ Camera:
   m_OcclusionCulling: 1
   m_StereoConvergence: 10
   m_StereoSeparation: 0.022
---- !u!4 &761284775
+--- !u!4 &269548273
 Transform:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 761284772}
+  m_GameObject: {fileID: 269548270}
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
   m_LocalPosition: {x: 0, y: 0, z: 0}
@@ -211,7 +211,7 @@ Transform:
   m_Children: []
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
---- !u!1 &1821535883
+--- !u!1 &1455455635
 GameObject:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
@@ -219,8 +219,8 @@ GameObject:
   m_PrefabAsset: {fileID: 0}
   serializedVersion: 6
   m_Component:
-  - component: {fileID: 1821535885}
-  - component: {fileID: 1821535884}
+  - component: {fileID: 1455455637}
+  - component: {fileID: 1455455636}
   m_Layer: 0
   m_Name: GameManager
   m_TagString: Untagged
@@ -228,13 +228,13 @@ GameObject:
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
   m_IsActive: 1
---- !u!114 &1821535884
+--- !u!114 &1455455636
 MonoBehaviour:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1821535883}
+  m_GameObject: {fileID: 1455455635}
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: c164aae1537951442a086d395524aa7d, type: 3}
@@ -248,6 +248,30 @@ MonoBehaviour:
   speed: 1
   tool: 0
   roomType: 2
+  placeDef:
+    id: 
+    name: 
+    desc: 
+    kind: 0
+    room: 0
+    w: 1
+    h: 1
+    cost: 0
+    watts: 0
+    coolingKW: 0
+    supplyKW: 0
+    backupKW: 0
+    bandwidth: 0
+    monthly: 0
+    ports: 0
+    portGbps: 0
+    rackU: 0
+    rackKW: 0
+    staff: 0
+    model: 
+    level: 1
+    research: 0
+    color: {r: 0.5, g: 0.5, b: 0.5, a: 1}
   placeRot: 0
   hoverTile: {x: -1, y: -1}
   hoverObject:
@@ -259,6 +283,9 @@ MonoBehaviour:
     devices: []
     contractId: -1
     linkCore: -1
+    linkCore2: -1
+    dualPdu: 0
+    pduTripped: 0
     failed: 0
     repairLeft: 0
     placedOrder: 0
@@ -274,16 +301,19 @@ MonoBehaviour:
     devices: []
     contractId: -1
     linkCore: -1
+    linkCore2: -1
+    dualPdu: 0
+    pduTripped: 0
     failed: 0
     repairLeft: 0
     placedOrder: 0
---- !u!4 &1821535885
+--- !u!4 &1455455637
 Transform:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1821535883}
+  m_GameObject: {fileID: 1455455635}
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
   m_LocalPosition: {x: 0, y: 0, z: 0}
@@ -296,5 +326,5 @@ Transform:
 SceneRoots:
   m_ObjectHideFlags: 0
   m_Roots:
-  - {fileID: 761284775}
-  - {fileID: 1821535885}
+  - {fileID: 269548273}
+  - {fileID: 1455455637}
