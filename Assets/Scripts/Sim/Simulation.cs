@@ -31,6 +31,7 @@ namespace DCT
         public List<int> tiles = new List<int>();
         public float heatKW, coolKW, temp = 21f;
         public Vector2 center;
+        public int floor;
         public bool suppressed;
         public float raisedFrac;
     }
@@ -157,7 +158,7 @@ namespace DCT
         public void RebuildIndex()
         {
             objById.Clear();
-            occupancy = new int[S.mapW * S.mapH];
+            occupancy = new int[S.mapW * S.mapH * GameState.MaxFloors];
             placeCounter = 0;
             foreach (var o in S.objects)
             {
@@ -177,7 +178,7 @@ namespace DCT
             Footprint(d, o.rot, out int w, out int h);
             for (int y = o.y; y < o.y + h; y++)
                 for (int x = o.x; x < o.x + w; x++)
-                    if (S.InBounds(x, y)) occupancy[y * S.mapW + x] = value;
+                    if (S.InBounds(x, y)) occupancy[S.Idx(o.floor, x, y)] = value;
         }
 
         public static void Footprint(FacilityDef d, int rot, out int w, out int h)
@@ -185,11 +186,24 @@ namespace DCT
             if (rot % 2 == 1) { w = d.h; h = d.w; } else { w = d.w; h = d.h; }
         }
 
-        public PlacedObject ObjectAt(int x, int y)
+        /// <summary>Object at a tile on the floor currently being viewed.</summary>
+        public PlacedObject ObjectAt(int x, int y) => ObjectAtF(S.floor, x, y);
+
+        public PlacedObject ObjectAtF(int f, int x, int y)
         {
-            if (!S.InBounds(x, y)) return null;
-            int id = occupancy[y * S.mapW + x];
+            if (!S.InBounds(x, y) || f < 0 || f >= GameState.MaxFloors) return null;
+            int id = occupancy[S.Idx(f, x, y)];
             return id != 0 && objById.TryGetValue(id, out var o) ? o : null;
+        }
+
+        /// <summary>Changes the floor being viewed and edited.</summary>
+        public void SetFloor(int f)
+        {
+            f = Mathf.Clamp(f, 0, Mathf.Min(GameState.MaxFloors - 1, S.TopFloor + 1));
+            if (f == S.floor) return;
+            S.floor = f;
+            tilesVersion++;
+            objectsVersion++;
         }
 
         public void Log(string text, int severity = 0)
@@ -267,7 +281,7 @@ namespace DCT
             if (zoneOf != null)
                 foreach (var z in zones) foreach (var t in z.tiles) oldTemps[t] = z.temp;
 
-            zoneOf = new int[S.mapW * S.mapH];
+            zoneOf = new int[S.mapW * S.mapH * GameState.MaxFloors];
             for (int i = 0; i < zoneOf.Length; i++) zoneOf[i] = -1;
             zones.Clear();
             var stack = new Stack<int>();
@@ -284,14 +298,16 @@ namespace DCT
                 {
                     int t = stack.Pop();
                     z.tiles.Add(t);
-                    int x = t % S.mapW, y = t / S.mapW;
+                    int fl = t / S.Plane, rem = t % S.Plane;
+                    int x = rem % S.mapW, y = rem / S.mapW;
+                    z.floor = fl;
                     c += new Vector2(x, y);
                     if (oldTemps.TryGetValue(t, out float ot)) { sumT += ot; nT++; }
                     TryPush(x + 1, y); TryPush(x - 1, y); TryPush(x, y + 1); TryPush(x, y - 1);
                     void TryPush(int nx, int ny)
                     {
                         if (!S.InBounds(nx, ny)) return;
-                        int ni = ny * S.mapW + nx;
+                        int ni = S.Idx(z.floor, nx, ny);
                         if (zoneOf[ni] != -1 || S.rooms[ni] != (int)RoomType.ServerHall) return;
                         zoneOf[ni] = z.id;
                         stack.Push(ni);
@@ -307,7 +323,7 @@ namespace DCT
             zonesDirty = false;
         }
 
-        public int ZoneAt(PlacedObject o) => zoneOf == null ? -1 : zoneOf[o.y * S.mapW + o.x];
+        public int ZoneAt(PlacedObject o) => zoneOf == null ? -1 : zoneOf[S.Idx(o.floor, o.x, o.y)];
 
         public void Recompute()
         {
@@ -520,6 +536,7 @@ namespace DCT
 
         void RollFailures()
         {
+            if (S.cheatNoFailures) return;
             float mul = FailureMul;
             foreach (var o in S.objects)
             {
@@ -776,7 +793,8 @@ namespace DCT
             hourlyCost = company.sims.Sum(x => x.siteHourlyCost);
             hourlyIncome = S.contracts.Where(c => c.status == ContractStatus.Active).Sum(c => c.monthlyPay) / Catalog.HoursPerMonth;
 
-            if (S.money < 0)
+            if (S.cheatInfiniteMoney && S.money < 500_000_000f) S.money = 1_000_000_000f;
+            if (S.money < 0 && !S.cheatNoBankruptcy)
             {
                 if (S.bankruptHours == 0) Log("You are in debt! Get back above $0 within 30 days or the bank will foreclose.", 3);
                 S.bankruptHours++;
@@ -825,7 +843,7 @@ namespace DCT
 
         void RollEvents()
         {
-            if (S.Day < 3) return;
+            if (S.Day < 3 || S.cheatNoEvents) return;
             float bad = 0.07f * S.city.disasterRate;
             if (rng.NextDouble() < bad)
             {
@@ -1004,41 +1022,43 @@ namespace DCT
             return new RectInt(x0, y0, Mathf.Abs(a.x - b.x) + 1, Mathf.Abs(a.y - b.y) + 1);
         }
 
+        bool CanFoundationAt(int f, int x, int y)
+        {
+            if (!S.InBounds(x, y) || !S.Owned(x, y)) return false;
+            int i = S.Idx(f, x, y);
+            if (S.rooms[i] != 0 || occupancy[i] != 0) return false;
+            if (f == 0) return S.obstacles[y * S.mapW + x] == 0;
+            return S.RoomAt(f - 1, x, y) != RoomType.None;   // upper floors need structure below
+        }
+
         public int BuildFoundation(RectInt r, bool apply, out float cost)
         {
+            int f = S.floor;
             cost = 0; int n = 0;
+            float per = f == 0 ? Catalog.FoundationCost : Catalog.UpperFloorCost;
             for (int y = r.yMin; y < r.yMax; y++)
                 for (int x = r.xMin; x < r.xMax; x++)
-                {
-                    if (!S.InBounds(x, y) || !S.Owned(x, y)) continue;
-                    int i = y * S.mapW + x;
-                    if (S.rooms[i] != 0 || S.obstacles[i] != 0 || occupancy[i] != 0) continue;
-                    n++; cost += Catalog.FoundationCost;
-                }
+                    if (CanFoundationAt(f, x, y)) { n++; cost += per; }
             if (!apply || n == 0) return n;
             Checkpoint();
             if (!Spend(cost)) { Log("Not enough money to build that.", 2); return 0; }
             for (int y = r.yMin; y < r.yMax; y++)
                 for (int x = r.xMin; x < r.xMax; x++)
-                {
-                    if (!S.InBounds(x, y) || !S.Owned(x, y)) continue;
-                    int i = y * S.mapW + x;
-                    if (S.rooms[i] != 0 || S.obstacles[i] != 0 || occupancy[i] != 0) continue;
-                    S.rooms[i] = (int)RoomType.Corridor;
-                }
+                    if (CanFoundationAt(f, x, y)) S.rooms[S.Idx(f, x, y)] = (int)RoomType.Corridor;
             TilesChanged();
             return n;
         }
 
         public int PaintRoom(RectInt r, RoomType t, bool apply, out float cost)
         {
+            int f = S.floor;
             cost = 0; int n = 0;
             var tiles = new List<int>();
             for (int y = r.yMin; y < r.yMax; y++)
                 for (int x = r.xMin; x < r.xMax; x++)
                 {
                     if (!S.InBounds(x, y)) continue;
-                    int i = y * S.mapW + x;
+                    int i = S.Idx(f, x, y);
                     if (S.rooms[i] == 0 || S.rooms[i] == (int)t) continue;
                     var o = ObjectAt(x, y);
                     if (o != null && Catalog.Facility(o.def).room != t) continue;
@@ -1054,24 +1074,29 @@ namespace DCT
             return n;
         }
 
-        /// <summary>Demolish works in layers: objects first, then rooms back to corridor, then the foundation, then obstacles.</summary>
+        /// <summary>Demolish works in layers on the current floor: objects, trays/raised floor, rooms, foundation, then (ground only) trees and rocks.</summary>
         public int Demolish(RectInt r, bool apply, out float cost, out string what)
         {
+            int f = S.floor;
             cost = 0; what = "";
             if (apply) Checkpoint();
             var objs = new HashSet<PlacedObject>();
-            int rooms = 0, floors = 0, obst = 0;
+            int rooms = 0, floorsN = 0, obst = 0, blocked = 0;
             float obstCost = 0;
             for (int y = r.yMin; y < r.yMax; y++)
                 for (int x = r.xMin; x < r.xMax; x++)
                 {
                     if (!S.InBounds(x, y)) continue;
-                    int i = y * S.mapW + x;
+                    int i = S.Idx(f, x, y);
                     var o = ObjectAt(x, y);
                     if (o != null) objs.Add(o);
                     if (S.rooms[i] > (int)RoomType.Corridor) rooms++;
-                    else if (S.rooms[i] == (int)RoomType.Corridor) floors++;
-                    if (S.obstacles[i] != 0 && S.Owned(x, y)) { obst++; obstCost += S.obstacles[i] == 1 ? 150 : 400; }
+                    else if (S.rooms[i] == (int)RoomType.Corridor)
+                    {
+                        if (f + 1 < GameState.MaxFloors && S.RoomAt(f + 1, x, y) != RoomType.None) blocked++;
+                        else floorsN++;
+                    }
+                    if (f == 0 && S.obstacles[y * S.mapW + x] != 0 && S.Owned(x, y)) { obst++; obstCost += S.obstacles[y * S.mapW + x] == 1 ? 150 : 400; }
                 }
             if (objs.Count > 0)
             {
@@ -1097,9 +1122,10 @@ namespace DCT
                 {
                     for (int y = r.yMin; y < r.yMax; y++)
                         for (int x = r.xMin; x < r.xMax; x++)
-                            if (S.InBounds(x, y)) S.flags[y * S.mapW + x] &= ~flag;
+                            if (S.InBounds(x, y)) S.flags[S.Idx(f, x, y)] &= ~flag;
                     Refund(-cost);
                     TilesChanged();
+                    objectsVersion++;
                 }
                 return n;
             }
@@ -1110,25 +1136,34 @@ namespace DCT
                 {
                     for (int y = r.yMin; y < r.yMax; y++)
                         for (int x = r.xMin; x < r.xMax; x++)
-                            if (S.InBounds(x, y) && S.rooms[y * S.mapW + x] > 1) S.rooms[y * S.mapW + x] = 1;
+                            if (S.InBounds(x, y) && S.rooms[S.Idx(f, x, y)] > 1) S.rooms[S.Idx(f, x, y)] = 1;
                     TilesChanged();
                 }
                 return rooms;
             }
-            if (floors > 0)
+            if (floorsN > 0)
             {
-                cost = -floors * Catalog.FoundationCost * 0.5f;
-                what = $"Remove {floors} foundation tile(s)";
+                float per = f == 0 ? Catalog.FoundationCost : Catalog.UpperFloorCost;
+                cost = -floorsN * per * 0.5f;
+                what = $"Remove {floorsN} {(f == 0 ? "foundation" : "floor slab")} tile(s)" + (blocked > 0 ? $" ({blocked} hold up the floor above)" : "");
                 if (apply)
                 {
                     for (int y = r.yMin; y < r.yMax; y++)
                         for (int x = r.xMin; x < r.xMax; x++)
-                            if (S.InBounds(x, y) && S.rooms[y * S.mapW + x] == 1) S.rooms[y * S.mapW + x] = 0;
+                        {
+                            if (!S.InBounds(x, y)) continue;
+                            int i = S.Idx(f, x, y);
+                            if (S.rooms[i] != 1) continue;
+                            if (f + 1 < GameState.MaxFloors && S.RoomAt(f + 1, x, y) != RoomType.None) continue;
+                            S.rooms[i] = 0;
+                            S.flags[i] = 0;
+                        }
                     Refund(-cost);
                     TilesChanged();
                 }
-                return floors;
+                return floorsN;
             }
+            if (blocked > 0) { what = "Remove the floor above first"; return 0; }
             if (obst > 0)
             {
                 cost = obstCost;
@@ -1155,14 +1190,16 @@ namespace DCT
 
         public string CanPlace(FacilityDef d, int x, int y, int rot)
         {
+            int f = S.floor;
             if (!IsUnlocked(d.id)) return "Not researched yet";
+            if (d.room == RoomType.Outdoor && f > 0) return "Outdoor equipment goes on the ground floor";
             Footprint(d, rot, out int w, out int h);
             for (int yy = y; yy < y + h; yy++)
                 for (int xx = x; xx < x + w; xx++)
                 {
                     if (!S.InBounds(xx, yy) || !S.Owned(xx, yy)) return "Must be on land you own";
-                    int i = yy * S.mapW + xx;
-                    if (S.obstacles[i] != 0) return "Clear the trees/rocks first";
+                    int i = S.Idx(f, xx, yy);
+                    if (f == 0 && S.obstacles[yy * S.mapW + xx] != 0) return "Clear the trees/rocks first";
                     if (occupancy[i] != 0) return "Tile is occupied";
                     var room = (RoomType)S.rooms[i];
                     if (d.room == RoomType.Outdoor) { if (room != RoomType.None) return "Must be placed outdoors (not on the building)"; }
@@ -1185,7 +1222,7 @@ namespace DCT
             if (CanPlace(d, x, y, rot) != null) return null;
             Checkpoint();
             Spend(d.cost);
-            var o = new PlacedObject { id = S.NewId(), def = d.id, x = x, y = y, rot = rot, placedOrder = ++placeCounter };
+            var o = new PlacedObject { id = S.NewId(), def = d.id, x = x, y = y, rot = rot, placedOrder = ++placeCounter, floor = S.floor };
             S.objects.Add(o);
             objById[o.id] = o;
             MarkOccupancy(o, o.id);
@@ -1283,17 +1320,11 @@ namespace DCT
 
         public float CableCost(PlacedObject rack, PlacedObject core)
         {
-            int dist = Mathf.Abs(rack.x - core.x) + Mathf.Abs(rack.y - core.y);
-            return Catalog.CableBaseCost + dist * Catalog.CablePerTile * (TrayRouted(rack, core.id) ? 0.5f : 1f);
+            var route = CableRouteFor(rack, core);
+            return Catalog.CableBaseCost + route.dist * Catalog.CablePerTile * (route.routed ? 0.5f : 1f);
         }
 
-        public string CableError(PlacedObject rack, PlacedObject core)
-        {
-            int dist = Mathf.Abs(rack.x - core.x) + Mathf.Abs(rack.y - core.y);
-            if (dist > MaxLooseCable && !TrayRouted(rack, core.id))
-                return $"{dist} tiles is too far for loose cabling (max {MaxLooseCable}). Build cable trays linking the rack to the network room.";
-            return null;
-        }
+        public string CableError(PlacedObject rack, PlacedObject core) => CableRouteFor(rack, core).error;
 
         public int FreePorts(PlacedObject core)
         {
@@ -1322,7 +1353,7 @@ namespace DCT
             PlacedObject best = null; float bestScore = float.MaxValue;
             foreach (var c in ObjectsOfKind(FacilityKind.CoreSwitch))
             {
-                if (c.failed || FreePorts(c) <= 0 || S.Room(c.x, c.y) != RoomType.Network || CableError(rack, c) != null) continue;
+                if (c.failed || FreePorts(c) <= 0 || S.RoomAt(c.floor, c.x, c.y) != RoomType.Network || CableError(rack, c) != null) continue;
                 float score = CableCost(rack, c) - Catalog.Facility(c.def).portGbps * 50f;
                 if (score < bestScore) { bestScore = score; best = c; }
             }

@@ -32,6 +32,8 @@ namespace DCT
             new KeyValuePair<string, KeyCode>("Dashboard", KeyCode.J),
             new KeyValuePair<string, KeyCode>("HeatMap", KeyCode.H),
             new KeyValuePair<string, KeyCode>("CycleOverlay", KeyCode.O),
+            new KeyValuePair<string, KeyCode>("FloorUp", KeyCode.PageUp),
+            new KeyValuePair<string, KeyCode>("FloorDown", KeyCode.PageDown),
             new KeyValuePair<string, KeyCode>("CamLeft", KeyCode.Q),
             new KeyValuePair<string, KeyCode>("CamRight", KeyCode.E),
             new KeyValuePair<string, KeyCode>("QuickSave", KeyCode.F5),

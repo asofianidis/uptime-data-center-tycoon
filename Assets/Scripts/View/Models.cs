@@ -25,6 +25,7 @@ namespace DCT
                 case FacilityKind.Solar: return Solar(mb, d);
                 case FacilityKind.Suppression: return Suppression(mb, d);
                 case FacilityKind.Battery: return Battery(mb, d);
+                case FacilityKind.Elevator: return Elevator(mb, d);
             }
             mb.Box(new Vector3(0, 0.5f, 0), new Vector3(0.8f, 1f, 0.8f), d.color);
             return 1f;
@@ -271,6 +272,27 @@ namespace DCT
             mb.Box(new Vector3(0, 0.9f, -0.15f), new Vector3(0.3f, 0.35f, 0.05f), new Color(0.85f, 0.85f, 0.85f));
             mb.Box(new Vector3(0, 1.0f, -0.18f), new Vector3(0.06f, 0.06f, 0.01f), MeshBuilder.Led(new Color(0.2f, 1f, 0.3f)));
             return 1.65f;
+        }
+
+        static float Elevator(MeshBuilder mb, FacilityDef d)
+        {
+            Color frame = new Color(0.45f, 0.48f, 0.52f), glass = new Color(0.55f, 0.7f, 0.8f);
+            float H = 2.6f;
+            foreach (var cx in new[] { -0.42f, 0.42f })
+                foreach (var cz in new[] { -0.42f, 0.42f })
+                    mb.Box(new Vector3(cx, H * 0.5f, cz), new Vector3(0.08f, H, 0.08f), frame);
+            mb.Box(new Vector3(0, H, 0), new Vector3(0.92f, 0.08f, 0.92f), frame);
+            mb.Box(new Vector3(0, 0.03f, 0), new Vector3(0.88f, 0.06f, 0.88f), new Color(0.3f, 0.3f, 0.32f));
+            mb.Box(new Vector3(0.42f, H * 0.5f, 0), new Vector3(0.03f, H - 0.1f, 0.8f), glass);
+            mb.Box(new Vector3(-0.42f, H * 0.5f, 0), new Vector3(0.03f, H - 0.1f, 0.8f), glass);
+            mb.Box(new Vector3(0, H * 0.5f, 0.42f), new Vector3(0.8f, H - 0.1f, 0.03f), glass);
+            // Doors on the front with a call-button LED
+            mb.Box(new Vector3(-0.2f, 1.05f, -0.43f), new Vector3(0.38f, 2.1f, 0.03f), new Color(0.75f, 0.77f, 0.8f));
+            mb.Box(new Vector3(0.2f, 1.05f, -0.43f), new Vector3(0.38f, 2.1f, 0.03f), new Color(0.72f, 0.74f, 0.78f));
+            mb.Box(new Vector3(0.38f, 1.2f, -0.46f), new Vector3(0.05f, 0.05f, 0.01f), MeshBuilder.Led(new Color(1f, 0.7f, 0.2f)));
+            // Cable riser bundle in the back corner
+            mb.Box(new Vector3(-0.3f, H * 0.5f, 0.3f), new Vector3(0.12f, H, 0.12f), new Color(1f, 0.75f, 0.2f));
+            return H + 0.05f;
         }
 
         static float Battery(MeshBuilder mb, FacilityDef d)

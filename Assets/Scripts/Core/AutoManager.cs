@@ -241,9 +241,15 @@ namespace DCT
             var core = sim.ObjectsOfKind(FacilityKind.CoreSwitch).Where(c => !c.failed && sim.FreePorts(c) > 0)
                 .OrderBy(c => Mathf.Abs(c.x - rack.x) + Mathf.Abs(c.y - rack.y)).FirstOrDefault();
             if (core == null) return;
-            sim.PaintFlag(new RectInt(Mathf.Min(rack.x, core.x), rack.y, Mathf.Abs(rack.x - core.x) + 1, 1), GameState.FlagTray, true, out _);
-            sim.PaintFlag(new RectInt(core.x, Mathf.Min(rack.y, core.y), 1, Mathf.Abs(rack.y - core.y) + 1), GameState.FlagTray, true, out _);
+            LayTray(sim, rack, core);
             sim.AutoConnect(rack);
+        }
+
+        /// <summary>L-shaped tray run between two objects on the same floor.</summary>
+        public static void LayTray(Simulation sim, PlacedObject a, PlacedObject b)
+        {
+            sim.PaintFlag(new RectInt(Mathf.Min(a.x, b.x), a.y, Mathf.Abs(a.x - b.x) + 1, 1), GameState.FlagTray, true, out _);
+            sim.PaintFlag(new RectInt(b.x, Mathf.Min(a.y, b.y), 1, Mathf.Abs(a.y - b.y) + 1), GameState.FlagTray, true, out _);
         }
 
         static PlacedObject GetRack(Simulation sim, Contract c)

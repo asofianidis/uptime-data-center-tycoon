@@ -5,7 +5,7 @@ namespace DCT
 {
     public enum RoomType { None = 0, Corridor = 1, ServerHall = 2, Network = 3, Power = 4, Office = 5, Outdoor = 99 }
     public enum DeviceKind { Server, Switch }
-    public enum FacilityKind { Rack, Cooling, CoreSwitch, Isp, Transformer, Switchgear, Ups, Generator, Desk, Solar, Suppression, Battery }
+    public enum FacilityKind { Rack, Cooling, CoreSwitch, Isp, Transformer, Switchgear, Ups, Generator, Desk, Solar, Suppression, Battery, Elevator }
 
     /// <summary>Rack-mountable equipment (servers and top-of-rack switches).</summary>
     [System.Serializable]
@@ -56,6 +56,7 @@ namespace DCT
     public static class Catalog
     {
         public const float FoundationCost = 150f;
+        public const float UpperFloorCost = 260f;
         public const float RoomPaintCost = 25f;
         public const float CableBaseCost = 200f;
         public const float CablePerTile = 30f;
@@ -165,6 +166,9 @@ namespace DCT
             new FacilityDef { id = "bess", name = "Battery Storage (BESS)", kind = FacilityKind.Battery, room = RoomType.Power, w = 2, h = 1, cost = 90000, supplyKW = 100, capacityKWh = 400, level = 4, research = 60000,
                 desc = "400 kWh lithium battery. Charges when power is cheap (night), discharges at the evening peak, and backs up the grid during outages.", color = new Color(0.2f, 0.45f, 0.35f) },
 
+            new FacilityDef { id = "elevator", name = "Elevator & Cable Riser", kind = FacilityKind.Elevator, room = RoomType.Corridor, cost = 40000, watts = 2000, level = 1,
+                desc = "Connects floors for staff and network cables. Place one at the same spot on each floor you want to link (in a Corridor).", color = new Color(0.55f, 0.6f, 0.68f) },
+
             // ---- Office ----
             new FacilityDef { id = "desk", model = "desk", name = "Technician Desk", kind = FacilityKind.Desk, room = RoomType.Office, cost = 1500, watts = 300, staff = 1, level = 1,
                 desc = "Workspace for one technician. Technicians repair failed hardware automatically.", color = new Color(0.55f, 0.4f, 0.28f) },
@@ -267,6 +271,7 @@ namespace DCT
                 case FacilityKind.Solar: return "Solar";
                 case FacilityKind.Suppression: return "Fire Safety";
                 case FacilityKind.Battery: return "Battery Storage";
+                case FacilityKind.Elevator: return "Vertical";
             }
             return k.ToString();
         }

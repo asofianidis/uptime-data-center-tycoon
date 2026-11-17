@@ -34,8 +34,8 @@ namespace DCT
         public float AirflowFactor(PlacedObject o, out string note)
         {
             var f = FrontDir(o.rot);
-            var a1 = ObjectAt(o.x + f.x, o.y + f.y);
-            var a2 = ObjectAt(o.x + 2 * f.x, o.y + 2 * f.y);
+            var a1 = ObjectAtF(o.floor, o.x + f.x, o.y + f.y);
+            var a2 = ObjectAtF(o.floor, o.x + 2 * f.x, o.y + 2 * f.y);
             // Another rack directly in front, facing the same way: its hot exhaust blows into our intake.
             if (IsRack(a1) && a1.rot == o.rot) { note = "Intake sucks in another rack's exhaust (+35% heat)"; return 1.35f; }
             if (a1 != null && !IsRack(a1)) { note = "Intake blocked by equipment (+15% heat)"; return 1.15f; }
@@ -65,7 +65,7 @@ namespace DCT
             def = Catalog.Facility(core.def);
             if (def == null) { issue = "Not cabled to a core switch"; return false; }
             if (core.failed) { issue = "Core switch failed"; return false; }
-            if (S.Room(core.x, core.y) != RoomType.Network) { issue = "Core switch outside network room"; return false; }
+            if (S.RoomAt(core.floor, core.x, core.y) != RoomType.Network) { issue = "Core switch outside network room"; return false; }
             return true;
         }
 
@@ -97,6 +97,8 @@ namespace DCT
             if (rack.linkCore == core.id) return "Second uplink must go to a different core switch";
             if (rack.linkCore2 == core.id) return "Already connected";
             if (FreePorts(core) <= 0) return "Core switch has no free ports";
+            var ce = CableError(rack, core);
+            if (ce != null) return ce;
             Checkpoint();
             if (!Spend(CableCost(rack, core))) return "Not enough money";
             rack.linkCore2 = core.id;
@@ -111,11 +113,11 @@ namespace DCT
             PlacedObject best = null; float bestScore = float.MaxValue;
             foreach (var c in ObjectsOfKind(FacilityKind.CoreSwitch))
             {
-                if (c.id == rack.linkCore || c.failed || FreePorts(c) <= 0 || S.Room(c.x, c.y) != RoomType.Network) continue;
+                if (c.id == rack.linkCore || c.failed || FreePorts(c) <= 0 || S.RoomAt(c.floor, c.x, c.y) != RoomType.Network || CableError(rack, c) != null) continue;
                 float score = CableCost(rack, c) - Catalog.Facility(c.def).portGbps * 50f;
                 if (score < bestScore) { bestScore = score; best = c; }
             }
-            if (best == null) return "Need a second core switch with free ports";
+            if (best == null) return "Need a second reachable core switch with free ports (long runs need cable trays)";
             return ConnectSecondary(rack, best);
         }
 
@@ -224,7 +226,7 @@ namespace DCT
 
         void RebuildTrayComponents()
         {
-            trayComp = new int[S.mapW * S.mapH];
+            trayComp = new int[S.mapW * S.mapH * GameState.MaxFloors];
             if (S.flags == null) return;
             int next = 1;
             var stack = new Stack<int>();
@@ -236,12 +238,13 @@ namespace DCT
                 while (stack.Count > 0)
                 {
                     int t = stack.Pop();
-                    int x = t % S.mapW, y = t / S.mapW;
+                    int fl = t / S.Plane, rem = t % S.Plane;
+                    int x = rem % S.mapW, y = rem / S.mapW;
                     for (int k = 0; k < 4; k++)
                     {
                         int nx = x + (k == 0 ? 1 : k == 1 ? -1 : 0), ny = y + (k == 2 ? 1 : k == 3 ? -1 : 0);
                         if (!S.InBounds(nx, ny)) continue;
-                        int n = ny * S.mapW + nx;
+                        int n = S.Idx(fl, nx, ny);
                         if (trayComp[n] != 0 || (S.flags[n] & GameState.FlagTray) == 0) continue;
                         trayComp[n] = next;
                         stack.Push(n);
@@ -259,7 +262,7 @@ namespace DCT
             Footprint(d, o.rot, out int w, out int h);
             for (int y = o.y - 1; y <= o.y + h; y++)
                 for (int x = o.x - 1; x <= o.x + w; x++)
-                    if (S.InBounds(x, y) && trayComp[y * S.mapW + x] != 0) set.Add(trayComp[y * S.mapW + x]);
+                    if (S.InBounds(x, y) && trayComp[S.Idx(o.floor, x, y)] != 0) set.Add(trayComp[S.Idx(o.floor, x, y)]);
             return set;
         }
 
@@ -267,15 +270,80 @@ namespace DCT
         public bool TrayRouted(PlacedObject rack, int coreId)
         {
             if (!objById.TryGetValue(coreId, out var core)) return false;
-            var a = TrayCompsNear(rack);
-            if (a.Count == 0) return false;
-            return TrayCompsNear(core).Overlaps(a);
+            return CableRouteFor(rack, core).routed;
+        }
+
+        bool TrayLinked(PlacedObject a, PlacedObject b)
+        {
+            if (a.floor != b.floor) return false;
+            var ca = TrayCompsNear(a);
+            return ca.Count > 0 && TrayCompsNear(b).Overlaps(ca);
+        }
+
+        public struct CableRoute
+        {
+            public int dist;
+            public bool routed;
+            public string error;
+            public PlacedObject shaftRackFloor, shaftCoreFloor;
+        }
+
+        /// <summary>
+        /// Route for a cable from rack to core. Same floor: direct (tray or loose). Different floors: via an
+        /// Elevator &amp; Cable Riser column that exists on every floor in between.
+        /// </summary>
+        public CableRoute CableRouteFor(PlacedObject rack, PlacedObject core)
+        {
+            var r = new CableRoute();
+            if (rack.floor == core.floor)
+            {
+                r.dist = Mathf.Abs(rack.x - core.x) + Mathf.Abs(rack.y - core.y);
+                r.routed = TrayLinked(rack, core);
+                if (r.dist > MaxLooseCable && !r.routed)
+                    r.error = $"{r.dist} tiles is too far for loose cabling (max {MaxLooseCable}). Build cable trays linking the rack to the network room.";
+                return r;
+            }
+            int lo = Mathf.Min(rack.floor, core.floor), hi = Mathf.Max(rack.floor, core.floor);
+            int best = int.MaxValue;
+            foreach (var e in S.objects)
+            {
+                if (e.floor != rack.floor || Catalog.Facility(e.def).kind != FacilityKind.Elevator) continue;
+                bool column = true;
+                for (int f = lo; f <= hi && column; f++) column = IsElevator(f, e.x, e.y);
+                if (!column) continue;
+                var top = ObjectAtF(core.floor, e.x, e.y);
+                int d1 = Mathf.Abs(rack.x - e.x) + Mathf.Abs(rack.y - e.y);
+                int d2 = Mathf.Abs(core.x - e.x) + Mathf.Abs(core.y - e.y);
+                bool r1 = TrayLinked(rack, e), r2 = TrayLinked(top, core);
+                string err = null;
+                if (d1 > MaxLooseCable && !r1) err = $"Rack is {d1} tiles from the riser - add cable trays (max {MaxLooseCable} loose)";
+                else if (d2 > MaxLooseCable && !r2) err = $"Core switch is {d2} tiles from the riser - add cable trays (max {MaxLooseCable} loose)";
+                int dist = d1 + d2 + 3 * (hi - lo);
+                if (err == null && dist < best)
+                {
+                    best = dist;
+                    r.dist = dist; r.routed = r1 && r2; r.error = null;
+                    r.shaftRackFloor = e; r.shaftCoreFloor = top;
+                }
+                else if (best == int.MaxValue && r.error == null) r.error = err;
+            }
+            if (best == int.MaxValue)
+            {
+                r.dist = Mathf.Abs(rack.x - core.x) + Mathf.Abs(rack.y - core.y) + 3 * (hi - lo);
+                r.error ??= $"Cross-floor cabling needs an Elevator & Cable Riser stacked on floors {lo + 1}-{hi + 1}.";
+            }
+            return r;
         }
 
         /// <summary>Tile path along trays from near the rack to near the core (for drawing cables).</summary>
         public List<Vector2Int> TrayPath(PlacedObject rack, PlacedObject core)
         {
             if (trayComp == null) return null;
+            if (rack.floor != core.floor)
+            {
+                var route = CableRouteFor(rack, core);
+                return route.shaftRackFloor != null && TrayLinked(rack, route.shaftRackFloor) ? TrayPath(rack, route.shaftRackFloor) : null;
+            }
             var shared = TrayCompsNear(rack);
             shared.IntersectWith(TrayCompsNear(core));
             if (shared.Count == 0) return null;
@@ -287,7 +355,7 @@ namespace DCT
                 var l = new List<int>();
                 for (int y = o.y - 1; y <= o.y + h; y++)
                     for (int x = o.x - 1; x <= o.x + w; x++)
-                        if (S.InBounds(x, y) && trayComp[y * S.mapW + x] == comp) l.Add(y * S.mapW + x);
+                        if (S.InBounds(x, y) && trayComp[S.Idx(o.floor, x, y)] == comp) l.Add(S.Idx(o.floor, x, y));
                 return l;
             }
             var starts = Near(rack); var goals = new HashSet<int>(Near(core));
@@ -300,16 +368,17 @@ namespace DCT
                 if (goals.Contains(c))
                 {
                     var path = new List<Vector2Int>();
-                    for (int p = c; p != -1; p = prev[p]) path.Add(new Vector2Int(p % S.mapW, p / S.mapW));
+                    for (int p = c; p != -1; p = prev[p]) path.Add(new Vector2Int((p % S.Plane) % S.mapW, (p % S.Plane) / S.mapW));
                     path.Reverse();
                     return path;
                 }
-                int cx = c % S.mapW, cy = c / S.mapW;
+                int cfl = c / S.Plane, crem = c % S.Plane;
+                int cx = crem % S.mapW, cy = crem / S.mapW;
                 for (int k = 0; k < 4; k++)
                 {
                     int nx = cx + (k == 0 ? 1 : k == 1 ? -1 : 0), ny = cy + (k == 2 ? 1 : k == 3 ? -1 : 0);
                     if (!S.InBounds(nx, ny)) continue;
-                    int n = ny * S.mapW + nx;
+                    int n = S.Idx(cfl, nx, ny);
                     if (prev.ContainsKey(n) || trayComp[n] != comp) continue;
                     prev[n] = c;
                     q.Enqueue(n);
@@ -328,8 +397,8 @@ namespace DCT
                     if (!S.InBounds(x, y) || S.HasFlag(x, y, flag)) continue;
                     var room = S.Room(x, y);
                     if (flag == GameState.FlagRaised && room != RoomType.ServerHall) continue;
-                    if (flag == GameState.FlagTray && room == RoomType.None && !S.Owned(x, y)) continue;
-                    tiles.Add(y * S.mapW + x);
+                    if (flag == GameState.FlagTray && room == RoomType.None && (S.floor > 0 || !S.Owned(x, y))) continue;
+                    tiles.Add(S.Idx(S.floor, x, y));
                 }
             cost = tiles.Count * (flag == GameState.FlagTray ? TrayCost : RaisedCost);
             if (!apply || tiles.Count == 0) return tiles.Count;
@@ -521,6 +590,12 @@ namespace DCT
 
         public void Fire() { if (S.staff.Count > 0) FireStaff(S.staff[S.staff.Count - 1]); }
 
+        public int DeskFloor(int index)
+        {
+            var desks = ObjectsOfKind(FacilityKind.Desk).OrderBy(d => d.id).ToList();
+            return desks.Count == 0 ? 0 : desks[index % desks.Count].floor;
+        }
+
         public Vector2 DeskPosition(int index)
         {
             var desks = ObjectsOfKind(FacilityKind.Desk).OrderBy(d => d.id).ToList();
@@ -532,32 +607,80 @@ namespace DCT
 
         bool looseWalk;
 
-        bool Walkable(int x, int y)
+        bool IsElevator(int f, int x, int y)
         {
-            if (!S.InBounds(x, y)) return false;
-            int i = y * S.mapW + x;
-            if (occupancy[i] != 0 && !looseWalk) return false;
-            if (S.obstacles[i] != 0) return false;
-            return S.rooms[i] != 0 || S.Owned(x, y);
+            var o = ObjectAtF(f, x, y);
+            return o != null && Catalog.Facility(o.def).kind == FacilityKind.Elevator;
         }
 
-        /// <summary>BFS from a tile to any walkable tile next to the target object's footprint.</summary>
-        /// <summary>Strict path first; if the target is boxed in, squeeze past equipment (slower repair).</summary>
-        List<int> FindPath(int sx, int sy, PlacedObject target) => FindPath(sx, sy, target, out _);
+        bool Walkable(int f, int x, int y)
+        {
+            if (!S.InBounds(x, y) || f < 0 || f >= GameState.MaxFloors) return false;
+            int i = S.Idx(f, x, y);
+            if (occupancy[i] != 0 && !looseWalk && !IsElevator(f, x, y)) return false;
+            if (f == 0) return S.obstacles[y * S.mapW + x] == 0 && (S.rooms[i] != 0 || S.Owned(x, y));
+            return S.rooms[i] != 0;
+        }
 
-        List<int> FindPath(int sx, int sy, PlacedObject target, out bool squeezed)
+        IEnumerable<int> Neighbors(int c)
+        {
+            int f = c / S.Plane, rem = c % S.Plane, cx = rem % S.mapW, cy = rem / S.mapW;
+            if (cx + 1 < S.mapW) yield return S.Idx(f, cx + 1, cy);
+            if (cx > 0) yield return S.Idx(f, cx - 1, cy);
+            if (cy + 1 < S.mapH) yield return S.Idx(f, cx, cy + 1);
+            if (cy > 0) yield return S.Idx(f, cx, cy - 1);
+            if (IsElevator(f, cx, cy))
+            {
+                if (f + 1 < GameState.MaxFloors && IsElevator(f + 1, cx, cy)) yield return S.Idx(f + 1, cx, cy);
+                if (f > 0 && IsElevator(f - 1, cx, cy)) yield return S.Idx(f - 1, cx, cy);
+            }
+        }
+
+        bool WalkableIdx(int i) { int f = i / S.Plane, rem = i % S.Plane; return Walkable(f, rem % S.mapW, rem / S.mapW); }
+
+        List<int> Bfs(int start, HashSet<int> goals, int exactGoal = -1)
+        {
+            if (goals != null && goals.Contains(start)) return new List<int>();
+            if (start == exactGoal) return new List<int>();
+            var prev = new Dictionary<int, int> { [start] = -1 };
+            var q = new Queue<int>();
+            q.Enqueue(start);
+            while (q.Count > 0)
+            {
+                int c = q.Dequeue();
+                foreach (int n in Neighbors(c))
+                {
+                    if (prev.ContainsKey(n)) continue;
+                    bool isGoal = n == exactGoal || (goals != null && goals.Contains(n));
+                    if (!isGoal && !WalkableIdx(n)) continue;
+                    prev[n] = c;
+                    if (isGoal)
+                    {
+                        var path = new List<int>();
+                        for (int p = n; p != start; p = prev[p]) path.Add(p);
+                        path.Reverse();
+                        return path;
+                    }
+                    q.Enqueue(n);
+                }
+            }
+            return null;
+        }
+
+        /// <summary>Strict path first; if the target is boxed in, squeeze past equipment (slower repair).</summary>
+        List<int> FindPath(int sf, int sx, int sy, PlacedObject target, out bool squeezed)
         {
             squeezed = false;
-            var p = FindPathInner(sx, sy, target);
+            var p = FindPathInner(sf, sx, sy, target);
             if (p != null) return p;
             looseWalk = true;
-            try { p = FindPathInner(sx, sy, target); }
+            try { p = FindPathInner(sf, sx, sy, target); }
             finally { looseWalk = false; }
             squeezed = p != null;
             return p;
         }
 
-        List<int> FindPathInner(int sx, int sy, PlacedObject target)
+        List<int> FindPathInner(int sf, int sx, int sy, PlacedObject target)
         {
             var d = Catalog.Facility(target.def);
             Footprint(d, target.rot, out int w, out int h);
@@ -568,68 +691,16 @@ namespace DCT
                     bool inside = x >= target.x && x < target.x + w && y >= target.y && y < target.y + h;
                     bool diag = (x < target.x || x >= target.x + w) && (y < target.y || y >= target.y + h);
                     if (inside || diag) continue;
-                    if (Walkable(x, y)) goals.Add(y * S.mapW + x);
+                    if (Walkable(target.floor, x, y)) goals.Add(S.Idx(target.floor, x, y));
                 }
-            if (goals.Count == 0) return null;
-            int start = sy * S.mapW + sx;
-            if (goals.Contains(start)) return new List<int>();
-            var prev = new Dictionary<int, int> { [start] = -1 };
-            var q = new Queue<int>();
-            q.Enqueue(start);
-            while (q.Count > 0)
-            {
-                int c = q.Dequeue();
-                int cx = c % S.mapW, cy = c / S.mapW;
-                for (int k = 0; k < 4; k++)
-                {
-                    int nx = cx + (k == 0 ? 1 : k == 1 ? -1 : 0), ny = cy + (k == 2 ? 1 : k == 3 ? -1 : 0);
-                    if (!S.InBounds(nx, ny)) continue;
-                    int n = ny * S.mapW + nx;
-                    if (prev.ContainsKey(n) || !Walkable(nx, ny)) continue;
-                    prev[n] = c;
-                    if (goals.Contains(n))
-                    {
-                        var path = new List<int>();
-                        for (int p = n; p != start; p = prev[p]) path.Add(p);
-                        path.Reverse();
-                        return path;
-                    }
-                    q.Enqueue(n);
-                }
-            }
-            return null;
+            if (goals.Count == 0 || !S.InBounds(sx, sy)) return null;
+            return Bfs(S.Idx(sf, sx, sy), goals);
         }
 
-        List<int> FindPathToPoint(int sx, int sy, int gx, int gy)
+        List<int> FindPathToPoint(int sf, int sx, int sy, int gf, int gx, int gy)
         {
-            int start = sy * S.mapW + sx, goal = gy * S.mapW + gx;
-            if (start == goal) return new List<int>();
-            var prev = new Dictionary<int, int> { [start] = -1 };
-            var q = new Queue<int>();
-            q.Enqueue(start);
-            while (q.Count > 0)
-            {
-                int c = q.Dequeue();
-                int cx = c % S.mapW, cy = c / S.mapW;
-                for (int k = 0; k < 4; k++)
-                {
-                    int nx = cx + (k == 0 ? 1 : k == 1 ? -1 : 0), ny = cy + (k == 2 ? 1 : k == 3 ? -1 : 0);
-                    if (!S.InBounds(nx, ny)) continue;
-                    int n = ny * S.mapW + nx;
-                    if (prev.ContainsKey(n)) continue;
-                    if (n != goal && !Walkable(nx, ny)) continue;
-                    prev[n] = c;
-                    if (n == goal)
-                    {
-                        var path = new List<int>();
-                        for (int p = n; p != start; p = prev[p]) path.Add(p);
-                        path.Reverse();
-                        return path;
-                    }
-                    q.Enqueue(n);
-                }
-            }
-            return null;
+            if (!S.InBounds(sx, sy) || !S.InBounds(gx, gy)) return null;
+            return Bfs(S.Idx(sf, sx, sy), null, S.Idx(gf, gx, gy));
         }
 
         class Job
@@ -714,7 +785,8 @@ namespace DCT
         {
             var any = S.staff.FirstOrDefault();
             var start = any != null ? new Vector2(any.x, any.y) : DeskPosition(0);
-            return FindPathInner(Mathf.FloorToInt(start.x), Mathf.FloorToInt(start.y), o) != null;
+            int sf = any != null ? any.floor : DeskFloor(0);
+            return FindPathInner(sf, Mathf.FloorToInt(start.x), Mathf.FloorToInt(start.y), o) != null;
         }
 
         void StaffTick()
@@ -751,6 +823,7 @@ namespace DCT
                     }
                     var h0 = DeskPosition(rank);
                     m.x = m.px = h0.x; m.y = m.py = h0.y;
+                    m.floor = DeskFloor(rank);
                     m.fatigue = Mathf.Max(0, m.fatigue - 12f);
                     continue;
                 }
@@ -772,7 +845,7 @@ namespace DCT
                         .Take(6).ToList();
                     foreach (var mine in ranked)
                     {
-                        var path = FindPath(Mathf.FloorToInt(m.x), Mathf.FloorToInt(m.y), mine.obj, out bool squeezed);
+                        var path = FindPath(m.floor, Mathf.FloorToInt(m.x), Mathf.FloorToInt(m.y), mine.obj, out bool squeezed);
                         if (path == null) { unreachable.Add(mine.obj.id); continue; }
                         {
                             jobs.Remove(mine);
@@ -790,9 +863,9 @@ namespace DCT
                     {
                         var home = DeskPosition(rank);
                         if (m.path == null || m.path.Count == 0)
-                            m.path = FindPathToPoint(Mathf.FloorToInt(m.x), Mathf.FloorToInt(m.y), Mathf.FloorToInt(home.x), Mathf.FloorToInt(home.y)) ?? new List<int>();
+                            m.path = FindPathToPoint(m.floor, Mathf.FloorToInt(m.x), Mathf.FloorToInt(m.y), DeskFloor(rank), Mathf.FloorToInt(home.x), Mathf.FloorToInt(home.y)) ?? new List<int>();
                         Walk(m, WalkTilesPerHour);
-                        if (m.path.Count == 0) { m.x = home.x; m.y = home.y; m.state = "idle"; }
+                        if (m.path.Count == 0) { m.x = home.x; m.y = home.y; m.floor = DeskFloor(rank); m.state = "idle"; }
                         continue;
                     }
                 }
@@ -825,7 +898,16 @@ namespace DCT
             while (tiles > 0 && m.path.Count > 0)
             {
                 int t = m.path[0];
-                float tx = t % S.mapW + 0.5f, ty = t / S.mapW + 0.5f;
+                int tf = t / S.Plane, trem = t % S.Plane;
+                float tx = trem % S.mapW + 0.5f, ty = trem / S.mapW + 0.5f;
+                if (tf != m.floor)
+                {
+                    // Elevator ride: costs time, no interpolation between floors.
+                    m.floor = tf; m.x = m.px = tx; m.y = m.py = ty;
+                    tiles -= 2f;
+                    m.path.RemoveAt(0);
+                    continue;
+                }
                 float dx = tx - m.x, dy = ty - m.y;
                 float dist = Mathf.Sqrt(dx * dx + dy * dy);
                 if (dist <= tiles) { m.x = tx; m.y = ty; tiles -= dist; m.path.RemoveAt(0); }
@@ -1184,8 +1266,8 @@ namespace DCT
                     {
                         var d = Catalog.Facility(o.def);
                         bool indoors = d.room != RoomType.Outdoor;
-                        if (!indoors) continue;
-                        if (S.HasFlag(o.x, o.y, GameState.FlagRaised)) { if (d.kind == FacilityKind.Rack) protectedRacks++; continue; }
+                        if (!indoors || o.floor > 0) continue;
+                        if (S.HasFlagAt(o.floor, o.x, o.y, GameState.FlagRaised)) { if (d.kind == FacilityKind.Rack) protectedRacks++; continue; }
                         if (d.kind == FacilityKind.Rack)
                         {
                             foreach (var dev in o.devices)
@@ -1225,7 +1307,8 @@ namespace DCT
 
         public static readonly List<ScenarioDef> Scenarios = new List<ScenarioDef>
         {
-            new ScenarioDef { id = "sandbox", name = "Sandbox", desc = "Endless play on a random map.", goal = "No goal - build the biggest, most reliable data center you can.", days = 0 },
+            new ScenarioDef { id = "sandbox", name = "Endless", desc = "Endless play on a random map with the normal economy.", goal = "No goal - build the biggest, most reliable data center you can.", days = 0 },
+            new ScenarioDef { id = "creative", name = "Sandbox", desc = "Creative mode: unlimited money, all technology unlocked, max reputation, and switches for failures, events and bankruptcy. Achievements are disabled.", goal = "No goal - experiment freely.", days = 0 },
             new ScenarioDef { id = "desert", name = "Desert Heat", desc = "A scorching desert city where cooling is brutal.", goal = "Reach $150,000/month recurring revenue within 3 years.", days = 1080 },
             new ScenarioDef { id = "shoestring", name = "Shoestring", desc = "Start with only $110,000 - every dollar counts.", goal = "Reach reputation level 5 within 2 years.", days = 720 },
             new ScenarioDef { id = "aiboom", name = "AI Boom", desc = "Everyone wants GPUs. You start at level 5 with GPU servers researched.", goal = "Run 96 GPUs online for customers within 2 years.", days = 720 },
@@ -1239,6 +1322,17 @@ namespace DCT
         {
             switch (s.scenario)
             {
+                case "creative":
+                    s.creative = true;
+                    s.cheatInfiniteMoney = true;
+                    s.cheatNoBankruptcy = true;
+                    s.money = 1_000_000_000f;
+                    s.xp = Catalog.XpForLevel(Catalog.MaxLevel);
+                    s.peakLevel = Catalog.MaxLevel;
+                    s.rating = 80;
+                    foreach (var d in Catalog.Devices) if (d.research > 0) s.unlocked.Add(d.id);
+                    foreach (var f in Catalog.Facilities) if (f.research > 0) s.unlocked.Add(f.id);
+                    break;
                 case "desert": s.city.climate = "Desert"; s.city.coolingFactor = 0.68f; s.city.solarFactor = 1.3f; s.city.blurb = "Relentless desert heat. " + s.city.blurb; break;
                 case "shoestring": s.money = 110000; break;
                 case "aiboom":
@@ -1285,7 +1379,7 @@ namespace DCT
         void CheckScenario()
         {
             var sc = Scenario(S.scenario);
-            if (sc.id == "sandbox" || S.scenarioDone) return;
+            if (sc.id == "sandbox" || sc.id == "creative" || S.scenarioDone) return;
             ScenarioProgress(out _);
             bool won = false;
             switch (sc.id)
@@ -1339,7 +1433,7 @@ namespace DCT
 
         public void Unlock(string id)
         {
-            if (S.achievements.Contains(id)) return;
+            if (S.creative || S.achievements.Contains(id)) return;
             S.achievements.Add(id);
             try { PlayerPrefs.SetInt("ach_" + id, 1); PlayerPrefs.Save(); } catch { }
             var a = Achievements.FirstOrDefault(x => x.id == id);
@@ -1396,6 +1490,67 @@ namespace DCT
             S.current.bonuses += raise;
             Unlock("ipo");
             popups.Enqueue(new Popup { title = "IPO!", body = $"Your data center company is now publicly traded. The offering raised ${raise:N0}.\n\nFinal score: {Score:N0}\n\nThe market will keep sending customers - play on as long as you like." }.Add("Ring the bell", null));
+        }
+
+        // ================================================================ sandbox tools
+        public static readonly string[] SandboxEvents = { "outage", "heatwave", "powerspike", "fibercut", "surge", "recall", "fire", "leak", "ddos", "shortage", "bankrupt", "regulation", "pricewar", "breakin", "flood", "expansion", "grant", "press" };
+
+        public void SandboxAddMoney(float amount) { S.money += amount; Log($"Sandbox: added ${amount:N0}.", 0); }
+
+        public void SandboxSetLevel(int level)
+        {
+            level = Mathf.Clamp(level, 1, Catalog.MaxLevel);
+            S.xp = Catalog.XpForLevel(level);
+            S.peakLevel = Mathf.Max(S.peakLevel, level);
+        }
+
+        public void SandboxUnlockAll()
+        {
+            foreach (var d in Catalog.Devices) if (d.research > 0 && !S.unlocked.Contains(d.id)) S.unlocked.Add(d.id);
+            foreach (var f in Catalog.Facilities) if (f.research > 0 && !S.unlocked.Contains(f.id)) S.unlocked.Add(f.id);
+            Log("Sandbox: all technology unlocked.", 1);
+        }
+
+        public void SandboxSpawnOffer()
+        {
+            var c = ProcGen.GenerateContract(S, rng);
+            S.offers.Add(c);
+            Log($"Sandbox: new offer from {c.customer}.", 0);
+        }
+
+        public void SandboxRepairAll()
+        {
+            foreach (var site in S.sites)
+                foreach (var o in site.objects)
+                {
+                    o.failed = false; o.pduTripped = false;
+                    foreach (var d in o.devices) d.failed = false;
+                }
+            foreach (var sim in company.sims) foreach (var o in sim.Site.objects) sim.MarkDirty(o);
+            Recompute();
+            Log("Sandbox: everything repaired.", 1);
+        }
+
+        public void SandboxTrigger(string type)
+        {
+            if (TriggerEventNow(type)) Log($"Sandbox: triggered {type}.", 0);
+        }
+
+        bool TriggerEventNow(string type)
+        {
+            if (EventActive(type)) return false;
+            inSiteTick = true;
+            try { TriggerEvent(type); } finally { inSiteTick = false; }
+            return true;
+        }
+
+        public void SandboxSkipDays(int days)
+        {
+            for (int i = 0; i < days * Catalog.HoursPerDay && !S.gameOver; i++)
+            {
+                TickHour();
+                while (popups.Count > 0) popups.Dequeue();
+            }
         }
 
         // ================================================================ daily & monthly extras

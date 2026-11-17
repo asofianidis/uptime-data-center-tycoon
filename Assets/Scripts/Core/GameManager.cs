@@ -147,6 +147,45 @@ namespace DCT
             cam.SnapTo(center, 16f);
             yield return Shot("11b_cable_trays");
 
+            // Second floor: slab over the building, a server hall upstairs and an elevator/riser column.
+            {
+                S.money += 1_000_000;
+                int bw = S.ownX1 - S.ownX0, bh = S.ownY1 - S.ownY0;
+                var bld = new RectInt(S.ownX0 + bw / 2 - 7, S.ownY0 + bh / 2 - 5, 15, 11);
+                sim.SetFloor(1);
+                sim.BuildFoundation(bld, true, out _);
+                sim.PaintRoom(new RectInt(bld.x, bld.y + 3, 10, 8), RoomType.ServerHall, true, out _);
+                var core0 = sim.ObjectsOfKind(FacilityKind.CoreSwitch).First();
+                int ex = bld.x + 10, ey = bld.y + 2;
+                foreach (int fl in new[] { 0, 1 })
+                {
+                    sim.SetFloor(fl);
+                    var blocker = sim.ObjectAt(ex, ey);
+                    if (blocker != null) sim.RemoveObject(blocker);
+                    sim.PaintRoom(new RectInt(ex, ey, 1, 1), RoomType.Corridor, true, out _);
+                    sim.Place(Catalog.Facility("elevator"), ex, ey, 0);
+                }
+                sim.SetFloor(1);
+                var shaft = sim.ObjectAt(ex, ey);
+                for (int ri = 0; ri < 6; ri++)
+                {
+                    var rk = sim.Place(Catalog.Facility("rack_std"), bld.x + 1 + ri, bld.y + 8, 0);
+                    if (rk == null) continue;
+                    sim.AddDevice(rk, Catalog.Device("tor_1g"));
+                    sim.FillRack(rk, Catalog.Device("srv_basic"), 12);
+                    if (shaft != null) AutoManager.LayTray(sim, rk, shaft);
+                    sim.Connect(rk, core0);
+                }
+                sim.Place(Catalog.Facility("crac"), bld.x + 8, bld.y + 9, 0);
+                for (int h = 0; h < 6; h++) sim.TickHour();
+                sim.popups.Clear();
+                cam.SnapTo(center, 20f);
+                for (int k = 0; k < 20; k++) yield return null;
+                yield return Shot("11g_floor2");
+                sim.SetFloor(0);
+                yield return Shot("11h_floor1_again");
+            }
+
             // Second site in another city.
             S.money += 2_000_000;
             S.xp = Mathf.Max(S.xp, Catalog.XpForLevel(Company.MinLevelForSites));
@@ -237,7 +276,7 @@ namespace DCT
 
         void LoadState(GameState s, bool keepView = false)
         {
-            if (s.rooms == null || s.rooms.Length != s.mapW * s.mapH) s.rooms = new int[s.mapW * s.mapH];
+            if (s.rooms == null || s.rooms.Length < s.mapW * s.mapH) s.rooms = new int[s.mapW * s.mapH * GameState.MaxFloors];
             if (s.obstacles == null || s.obstacles.Length != s.mapW * s.mapH) s.obstacles = new int[s.mapW * s.mapH];
             // Sanitize: racks pointing to finished contracts.
             foreach (var o in s.objects)
@@ -307,6 +346,7 @@ namespace DCT
         public void SwitchSite(int i)
         {
             if (sim == null || i == sim.S.activeSite || i < 0 || i >= sim.company.sims.Count) return;
+            sim.S.floor = 0;
             sim = sim.company.SetActive(i);
             view.ResetSim(sim);
             selection.Clear();
@@ -394,6 +434,7 @@ namespace DCT
             }
 
             HandleHotkeys();
+            cam.targetY = sim.S.floor * GameState.FloorHeight;
             HandleWorldInput();
             selection.RemoveAll(o => !sim.objById.ContainsKey(o.id));
             view.ShowSelection(selection, tool == Tool.Connect ? new Color(1f, 0.8f, 0.2f) : new Color(0.3f, 0.85f, 1f));
@@ -410,6 +451,8 @@ namespace DCT
             if (Settings.Down("Goals")) ui.ToggleWindow(GameUI.Window.Goals);
             if (Settings.Down("Dashboard")) ui.ToggleWindow(GameUI.Window.Dashboard);
             if (Settings.Down("CycleOverlay")) view.CycleOverlay();
+            if (Settings.Down("FloorUp")) ChangeFloor(+1);
+            if (Settings.Down("FloorDown")) ChangeFloor(-1);
             if (Input.GetKeyDown(KeyCode.Alpha1) || Input.GetKeyDown(KeyCode.Keypad1)) speed = 1;
             if (Input.GetKeyDown(KeyCode.Alpha2) || Input.GetKeyDown(KeyCode.Keypad2)) speed = 2;
             if (Input.GetKeyDown(KeyCode.Alpha3) || Input.GetKeyDown(KeyCode.Keypad3)) speed = 3;
@@ -431,6 +474,19 @@ namespace DCT
                 else if (selection.Count > 0) selection.Clear();
                 else ui.OpenWindow(GameUI.Window.Menu);
             }
+        }
+
+        public void ChangeFloor(int delta)
+        {
+            int before = sim.S.floor;
+            sim.SetFloor(before + delta);
+            if (sim.S.floor != before)
+            {
+                selection.Clear();
+                dragging = false;
+                ui.Toast(sim.S.floor == 0 ? "Ground floor" : $"Floor {sim.S.floor + 1}" + (sim.S.floor > sim.S.TopFloor ? " (empty - build floor slabs over the storey below)" : ""), 0);
+            }
+            else if (delta > 0) ui.Toast("Build on the top floor first to go higher (max 4 floors).", 2);
         }
 
         public void SetTool(Tool t)
@@ -460,12 +516,14 @@ namespace DCT
         {
             Ray r = Camera.main.ScreenPointToRay(Input.mousePosition);
             PlacedObject best = null; float bestT = float.MaxValue;
+            float fy = sim.S.floor * GameState.FloorHeight;
             foreach (var o in sim.S.objects)
             {
+                if (o.floor != sim.S.floor) continue;
                 var d = Catalog.Facility(o.def);
                 Simulation.Footprint(d, o.rot, out int w, out int h);
                 float height = d.kind == FacilityKind.Rack ? Models.RackHeight(d) : d.kind == FacilityKind.Desk ? 1.1f : 1.8f;
-                var b = new Bounds(new Vector3(o.x + w * 0.5f, height * 0.5f, o.y + h * 0.5f), new Vector3(w * 0.92f, height, h * 0.92f));
+                var b = new Bounds(new Vector3(o.x + w * 0.5f, fy + height * 0.5f, o.y + h * 0.5f), new Vector3(w * 0.92f, height, h * 0.92f));
                 if (b.IntersectRay(r, out float t) && t < bestT) { bestT = t; best = o; }
             }
             return best;
@@ -515,7 +573,7 @@ namespace DCT
                             if (rect.width * rect.height > 1)
                             {
                                 // Box-select racks (or everything if no racks in the box).
-                                var inBox = sim.S.objects.Where(o => rect.Contains(new Vector2Int(o.x, o.y))).ToList();
+                                var inBox = sim.S.objects.Where(o => o.floor == sim.S.floor && rect.Contains(new Vector2Int(o.x, o.y))).ToList();
                                 var rackSel = inBox.Where(o => Catalog.Facility(o.def).kind == FacilityKind.Rack).ToList();
                                 foreach (var o in (rackSel.Count > 0 ? rackSel : inBox)) if (!selection.Contains(o)) selection.Add(o);
                             }

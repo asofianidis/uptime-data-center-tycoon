@@ -120,6 +120,7 @@ namespace DCT.Tests
             var rack = PlaceRack(sim, 0);
             Assert.NotNull(rack);
             sim.AddDevice(rack, Catalog.Device("srv_basic"));
+            foreach (var core in sim.ObjectsOfKind(FacilityKind.CoreSwitch).ToList()) AutoManager.LayTray(sim, rack, core);
             Assert.IsNull(sim.MakeRedundant(rack));
             sim.Recompute();
             Assert.IsTrue(sim.racks[rack.id].redundant, "redundant after MakeRedundant");

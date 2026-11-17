@@ -76,7 +76,7 @@ namespace DCT
 
         public static void GenerateLot(GameState s, System.Random r)
         {
-            s.rooms = new int[s.mapW * s.mapH];
+            s.rooms = new int[s.mapW * s.mapH * GameState.MaxFloors];
             s.obstacles = new int[s.mapW * s.mapH];
             int w = 20 + r.Next(5), h = 15 + r.Next(4);
             s.ownX0 = (s.mapW - w) / 2 - 4 + r.Next(9);

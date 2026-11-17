@@ -15,6 +15,7 @@ namespace DCT
         public bool blockScroll;
 
         float targetYaw, targetDist;
+        public float targetY;
         Vector3 lastMouse;
         Camera cam;
 
@@ -68,9 +69,10 @@ namespace DCT
                 }
                 if (Settings.Down("CamLeft")) targetYaw -= 90f;
                 if (Settings.Down("CamRight")) targetYaw += 90f;
-                if (Input.GetKey(KeyCode.PageUp)) pitch = Mathf.Clamp(pitch + 40f * dt, 35f, 85f);
-                if (Input.GetKey(KeyCode.PageDown)) pitch = Mathf.Clamp(pitch - 40f * dt, 35f, 85f);
+                if (Input.GetKey(KeyCode.Home)) pitch = Mathf.Clamp(pitch + 40f * dt, 35f, 85f);
+                if (Input.GetKey(KeyCode.End)) pitch = Mathf.Clamp(pitch - 40f * dt, 35f, 85f);
             }
+            focus.y = Mathf.Lerp(focus.y, targetY, 1f - Mathf.Exp(-10f * dt));
             focus.x = Mathf.Clamp(focus.x, boundsMin.x, boundsMax.x);
             focus.z = Mathf.Clamp(focus.z, boundsMin.y, boundsMax.y);
             yaw = Mathf.LerpAngle(yaw, targetYaw, 1f - Mathf.Exp(-12f * dt));
@@ -92,7 +94,7 @@ namespace DCT
             if (cam == null) cam = GetComponent<Camera>();
             Ray r = cam.ScreenPointToRay(Input.mousePosition);
             if (Mathf.Abs(r.direction.y) < 1e-4f) return false;
-            float t = -r.origin.y / r.direction.y;
+            float t = (focus.y - r.origin.y) / r.direction.y;
             if (t < 0) return false;
             p = r.origin + r.direction * t;
             return true;

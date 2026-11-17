@@ -456,8 +456,8 @@ namespace DCT
             var st = new GUIStyle(lblSmall) { alignment = TextAnchor.MiddleCenter, normal = { textColor = Color.white } };
             foreach (var z in Sim.zones)
             {
-                if (z.tiles.Count < 2) continue;
-                var wp = new Vector3(z.center.x + 0.5f, 0.1f, z.center.y + 0.5f);
+                if (z.tiles.Count < 2 || z.floor != S.floor) continue;
+                var wp = new Vector3(z.center.x + 0.5f, 0.1f + S.floor * GameState.FloorHeight, z.center.y + 0.5f);
                 var sp = cam.WorldToScreenPoint(wp);
                 if (sp.z < 0) continue;
                 var p = new Vector2(sp.x / scale, (Screen.height - sp.y) / scale);

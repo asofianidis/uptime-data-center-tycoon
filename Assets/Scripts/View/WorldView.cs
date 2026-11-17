@@ -12,8 +12,10 @@ namespace DCT
         public int highlightContract = -1;
 
         Material litMat, transMat, unlitMat;
-        GameObject groundGO, wallsGO, sceneryGO, gridGO, traysGO, hintGO;
-        Mesh groundMesh, wallsMesh, sceneryMesh, gridMesh, traysMesh, hintMesh;
+        GameObject groundGO, wallsGO, sceneryGO, gridGO, traysGO, hintGO, massGO;
+        Mesh groundMesh, wallsMesh, sceneryMesh, gridMesh, traysMesh, hintMesh, massMesh;
+        Transform floorRoot;
+        public float FloorY => sim != null ? sim.S.floor * GameState.FloorHeight : 0f;
         Material hintMat;
         Color[] groundColors;
         Color[] baseGroundColors;
@@ -46,21 +48,31 @@ namespace DCT
             litMat = new Material(Shader.Find("DC/Lit"));
             transMat = new Material(Shader.Find("DC/UnlitTransparent"));
             unlitMat = new Material(Shader.Find("DC/Unlit"));
+            floorRoot = new GameObject("FloorRoot").transform;
+            floorRoot.SetParent(transform, false);
             groundGO = MakeGO("Ground", litMat, out groundMesh);
+            groundGO.transform.SetParent(floorRoot, false);
+            massGO = MakeGO("LowerFloors", litMat, out massMesh);
             wallsGO = MakeGO("Walls", litMat, out wallsMesh);
+            wallsGO.transform.SetParent(floorRoot, false);
             sceneryGO = MakeGO("Scenery", litMat, out sceneryMesh);
             gridGO = MakeGO("Grid", transMat, out gridMesh);
+            gridGO.transform.SetParent(floorRoot, false);
             traysGO = MakeGO("Trays", litMat, out traysMesh);
+            traysGO.transform.SetParent(floorRoot, false);
             hintGO = MakeGO("Hint", transMat, out hintMesh);
+            hintGO.transform.SetParent(floorRoot, false);
             hintMat = hintGO.GetComponent<MeshRenderer>().material;
             hintGO.SetActive(false);
             gridGO.GetComponent<MeshRenderer>().material.color = new Color(1, 1, 1, 0.12f);
             groundGO.GetComponent<MeshRenderer>().material.SetFloat("_Glossiness", 0.1f);
 
             ghostGO = MakeGO("Ghost", transMat, out ghostMesh);
+            ghostGO.transform.SetParent(floorRoot, false);
             ghostMat = ghostGO.GetComponent<MeshRenderer>().material;
             ghostGO.SetActive(false);
             rectGO = MakeGO("DragRect", transMat, out rectMesh);
+            rectGO.transform.SetParent(floorRoot, false);
             rectMat = rectGO.GetComponent<MeshRenderer>().material;
             rectGO.SetActive(false);
 
@@ -111,6 +123,7 @@ namespace DCT
         void LateUpdate()
         {
             if (sim == null) return;
+            floorRoot.localPosition = new Vector3(0, FloorY, 0);
             if (builtTilesVersion != sim.tilesVersion) { BuildGround(); BuildWalls(); BuildScenery(); BuildGrid(); builtTilesVersion = sim.tilesVersion; }
             SyncObjects(builtObjectsVersion != sim.objectsVersion);
             UpdateGroundOverlay();
@@ -130,11 +143,20 @@ namespace DCT
             var mb = new MeshBuilder();
             var r = new System.Random(S.seed);
             // Big skirt around the map so the camera never sees the void.
-            mb.FlatQuad(-60, -60, S.mapW + 60, S.mapH + 60, -0.02f, new Color(0.2f, 0.33f, 0.17f));
+            float fy = FloorY;
+            mb.FlatQuad(-60, -60, S.mapW + 60, S.mapH + 60, -0.02f - fy, new Color(0.2f, 0.33f, 0.17f));
             for (int y = 0; y < S.mapH; y++)
                 for (int x = 0; x < S.mapW; x++)
                 {
-                    mb.FlatQuad(x, y, x + 1, y + 1, 0, Color.white);
+                    // Tile height relative to the viewed floor.
+                    float h = 0f;
+                    if (S.RoomAt(S.floor, x, y) == RoomType.None)
+                    {
+                        int top = -1;
+                        for (int f = S.floor - 1; f >= 0; f--) if (S.RoomAt(f, x, y) != RoomType.None) { top = f; break; }
+                        h = (top >= 0 ? (top + 1) * GameState.FloorHeight : 0f) - fy;
+                    }
+                    mb.FlatQuad(x, y, x + 1, y + 1, h, Color.white);
                 }
             mb.ToMesh(groundMesh);
             baseGroundColors = new Color[groundMesh.vertexCount];
@@ -144,10 +166,15 @@ namespace DCT
                 for (int x = 0; x < S.mapW; x++)
                 {
                     int i = y * S.mapW + x;
-                    var room = (RoomType)S.rooms[i];
+                    var room = S.Room(x, y);
                     Color c;
                     float n = (float)r.NextDouble();
-                    if (room == RoomType.None)
+                    bool roof = room == RoomType.None && S.floor > 0 && Enumerable.Range(0, S.floor).Any(f => S.RoomAt(f, x, y) != RoomType.None);
+                    if (roof)
+                    {
+                        c = new Color(0.5f + n * 0.03f, 0.52f + n * 0.03f, 0.55f);
+                    }
+                    else if (room == RoomType.None)
                     {
                         bool owned = S.Owned(x, y);
                         c = owned ? new Color(0.36f + n * 0.04f, 0.56f + n * 0.05f, 0.27f) : new Color(0.24f + n * 0.03f, 0.38f + n * 0.04f, 0.2f);
@@ -180,13 +207,16 @@ namespace DCT
             overlayTimer = 0.25f;
             var S = sim.S;
             bool changed = false;
-            for (int i = 0; i < S.rooms.Length; i++)
+            int plane = S.mapW * S.mapH;
+            if (baseGroundColors == null || baseGroundColors.Length < 4 + plane * 4) return;
+            for (int i = 0; i < plane; i++)
             {
                 int v = 4 + i * 4;
                 Color c = baseGroundColors[v];
-                if (heatOverlay && S.rooms[i] == (int)RoomType.ServerHall && sim.zoneOf != null && sim.zoneOf[i] >= 0 && sim.zoneOf[i] < sim.zones.Count)
+                int fi = S.floor * plane + i;
+                if (heatOverlay && S.rooms[fi] == (int)RoomType.ServerHall && sim.zoneOf != null && sim.zoneOf[fi] >= 0 && sim.zoneOf[fi] < sim.zones.Count)
                 {
-                    float t = sim.zones[sim.zoneOf[i]].temp;
+                    float t = sim.zones[sim.zoneOf[fi]].temp;
                     c = HeatColor(t);
                 }
                 if (groundColors[v] != c) { for (int k = 0; k < 4; k++) groundColors[v + k] = c; changed = true; }
@@ -226,7 +256,35 @@ namespace DCT
                         mb.Box(new Vector3(x + 0.5f, intH * 0.5f, y + 1), new Vector3(1f, intH, intT), WallColor(room, north));
                 }
             mb.ToMesh(wallsMesh);
+            BuildMass();
             BuildTrays();
+        }
+
+        /// <summary>Floors below the viewed one, drawn as solid storeys with windows.</summary>
+        void BuildMass()
+        {
+            var S = sim.S;
+            var mb = new MeshBuilder();
+            Color wall = new Color(0.74f, 0.75f, 0.76f), band = new Color(0.25f, 0.35f, 0.45f);
+            float H = GameState.FloorHeight;
+            for (int f = 0; f < S.floor; f++)
+                for (int y = 0; y < S.mapH; y++)
+                    for (int x = 0; x < S.mapW; x++)
+                    {
+                        if (S.RoomAt(f, x, y) == RoomType.None) continue;
+                        float y0 = f * H;
+                        void Face(int nx, int ny, Vector3 c, Vector3 size)
+                        {
+                            if (S.RoomAt(f, nx, ny) != RoomType.None) return;
+                            mb.Box(c + new Vector3(0, y0 + H * 0.5f, 0), size + new Vector3(0, H, 0), wall);
+                            mb.Box(c + new Vector3(0, y0 + H * 0.62f, 0), size * 1.05f + new Vector3(0, 0.7f, 0), band);
+                        }
+                        Face(x, y - 1, new Vector3(x + 0.5f, 0, y + 0.07f), new Vector3(1f, 0, 0.14f));
+                        Face(x, y + 1, new Vector3(x + 0.5f, 0, y + 0.93f), new Vector3(1f, 0, 0.14f));
+                        Face(x - 1, y, new Vector3(x + 0.07f, 0, y + 0.5f), new Vector3(0.14f, 0, 1f));
+                        Face(x + 1, y, new Vector3(x + 0.93f, 0, y + 0.5f), new Vector3(0.14f, 0, 1f));
+                    }
+            mb.ToMesh(massMesh);
         }
 
         bool Doorway(int x, int y, bool vertical)
@@ -377,8 +435,8 @@ namespace DCT
             var d = Catalog.Facility(o.def);
             var v = new ObjView();
             v.go = new GameObject($"{d.name} #{o.id}");
-            v.go.transform.SetParent(transform, false);
-            v.go.transform.position = ObjectCenter(d, o.x, o.y, o.rot);
+            v.go.transform.SetParent(floorRoot, false);
+            v.go.transform.localPosition = ObjectCenter(d, o.x, o.y, o.rot);
             v.go.transform.rotation = Quaternion.Euler(0, o.rot * 90f, 0);
             v.mesh = new Mesh();
             v.go.AddComponent<MeshFilter>().sharedMesh = v.mesh;
@@ -443,15 +501,26 @@ namespace DCT
                 line.numCornerVertices = 2;
                 line.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
             }
-            var a = ObjectCenter(Catalog.Facility(o.def), o.x, o.y, o.rot);
-            var b = ObjectCenter(Catalog.Facility(core.def), core.x, core.y, core.rot);
-            float tray = 2.45f + (o.id % 5) * 0.04f + extraOffset;
+            var fyv = Vector3.up * (o.floor * GameState.FloorHeight);
+            var a = ObjectCenter(Catalog.Facility(o.def), o.x, o.y, o.rot) + fyv;
+            var b = ObjectCenter(Catalog.Facility(core.def), core.x, core.y, core.rot) + fyv;
+            if (core.floor != o.floor)
+            {
+                var route = sim.CableRouteFor(o, core);
+                if (route.shaftRackFloor != null)
+                {
+                    var sh = route.shaftRackFloor;
+                    b = new Vector3(sh.x + 0.5f, 0, sh.y + 0.5f) + fyv;
+                    core = sh;   // draw to the riser; the vertical run continues inside the shaft
+                }
+            }
+            float tray = 2.45f + (o.id % 5) * 0.04f + extraOffset + o.floor * GameState.FloorHeight;
             var trayPath = sim.TrayPath(o, core);
             if (trayPath != null && trayPath.Count > 0)
             {
                 float ty = TrayHeight + 0.06f + extraOffset * 0.3f;
                 var list = new List<Vector3> { a + Vector3.up * views[o.id].height };
-                foreach (var t in trayPath) list.Add(new Vector3(t.x + 0.5f, ty, t.y + 0.5f));
+                foreach (var t in trayPath) list.Add(new Vector3(t.x + 0.5f, ty, t.y + 0.5f) + fyv);
                 list.Add(b + Vector3.up * (views.TryGetValue(core.id, out var cv0) ? cv0.height : 2f));
                 line.positionCount = list.Count;
                 line.SetPositions(list.ToArray());
@@ -487,6 +556,9 @@ namespace DCT
             foreach (var o in sim.S.objects)
             {
                 if (!views.TryGetValue(o.id, out var v)) continue;
+                bool here = o.floor == sim.S.floor;
+                if (v.go.activeSelf != here) v.go.SetActive(here);
+                if (!here) continue;
                 if (v.cable != null) v.cable.enabled = showCables;
                 if (v.cable2 != null) v.cable2.enabled = showCables;
                 Color c; bool flash = false;
@@ -523,7 +595,7 @@ namespace DCT
                 mb.ToMesh(ghostMesh);
                 ghostDef = d.id; ghostRot = rot;
             }
-            ghostGO.transform.position = ObjectCenter(d, x, y, rot);
+            ghostGO.transform.localPosition = ObjectCenter(d, x, y, rot);
             ghostGO.transform.rotation = Quaternion.Euler(0, rot * 90f, 0);
             ghostMat.color = ok ? new Color(0.4f, 1f, 0.5f, 0.55f) : new Color(1f, 0.3f, 0.25f, 0.55f);
         }
@@ -551,7 +623,7 @@ namespace DCT
             while (selectionMarkers.Count < objs.Count)
             {
                 var go = new GameObject("SelMarker");
-                go.transform.SetParent(transform, false);
+                go.transform.SetParent(floorRoot, false);
                 go.AddComponent<MeshFilter>().sharedMesh = markerMesh;
                 go.AddComponent<MeshRenderer>().sharedMaterial = new Material(transMat);
                 selectionMarkers.Add(go);
@@ -565,7 +637,8 @@ namespace DCT
                 if (d == null) { go.SetActive(false); continue; }
                 Simulation.Footprint(d, o.rot, out int w, out int h);
                 go.SetActive(true);
-                go.transform.position = new Vector3(o.x - 0.08f, 0, o.y - 0.08f);
+                go.transform.localPosition = new Vector3(o.x - 0.08f, 0, o.y - 0.08f);
+                if (o.floor != sim.S.floor) { go.SetActive(false); continue; }
                 go.transform.localScale = new Vector3(w + 0.16f, 1, h + 0.16f);
                 go.GetComponent<MeshRenderer>().sharedMaterial.color = new Color(c.r, c.g, c.b, 0.35f + 0.2f * Mathf.PingPong(Time.unscaledTime * 2f, 1f));
             }

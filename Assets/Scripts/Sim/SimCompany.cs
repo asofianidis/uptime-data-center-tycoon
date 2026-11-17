@@ -232,7 +232,7 @@ namespace DCT
             S.Bind(idx);
             var r = new System.Random(S.seed * 17 + idx * 1009);
             ProcGen.GenerateLot(S, r);
-            S.flags = new int[S.mapW * S.mapH];
+            S.flags = new int[S.mapW * S.mapH * GameState.MaxFloors];
             S.objects = new List<PlacedObject>();
             S.staff = new List<StaffMember>();
             S.events = new List<ActiveEvent>();

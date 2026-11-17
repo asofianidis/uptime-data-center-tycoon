@@ -70,6 +70,7 @@ namespace DCT
         public bool failed;
         public int repairLeft;
         public int placedOrder;
+        public int floor;
     }
 
     [Serializable]
@@ -134,6 +135,7 @@ namespace DCT
         public float px, py;           // previous-hour position (for smooth rendering)
         public string state = "idle";  // idle, walking, working, returning, off
         public string shift = "Day";   // Day (07-19) or Night (19-07)
+        public int floor;
         public float fatigue;
         public int taskObj = -1, taskDev = -1, taskTicket = -1;
         public float work;
@@ -268,15 +270,53 @@ namespace DCT
         public int activeSite;
         public bool tutorial;
         public int tutorialStep;
+
+        // ---- sandbox (creative) mode ----
+        public bool creative;
+        public bool cheatInfiniteMoney, cheatNoFailures, cheatNoEvents, cheatNoBankruptcy;
         [NonSerialized] public int bound = -1;
 
         public const int FlagTray = 1, FlagRaised = 2;
-        public bool HasFlag(int x, int y, int f) => InBounds(x, y) && flags != null && (flags[y * mapW + x] & f) != 0;
+        public const int MaxFloors = 4;
+        public const float FloorHeight = 3.2f;
+
+        /// <summary>Floor currently being viewed/edited by the player (not saved).</summary>
+        [NonSerialized] public int floor;
+
+        public int Idx(int f, int x, int y) => (f * mapH + y) * mapW + x;
+        public int Plane => mapW * mapH;
+        public bool HasFlag(int x, int y, int f) => HasFlagAt(floor, x, y, f);
+        public bool HasFlagAt(int fl, int x, int y, int f) => InBounds(x, y) && fl >= 0 && fl < MaxFloors && flags != null && (flags[Idx(fl, x, y)] & f) != 0;
+        public RoomType RoomAt(int fl, int x, int y) => InBounds(x, y) && fl >= 0 && fl < MaxFloors ? (RoomType)rooms[Idx(fl, x, y)] : RoomType.None;
+
+        /// <summary>Highest floor that has any building on it.</summary>
+        public int TopFloor
+        {
+            get
+            {
+                for (int f = MaxFloors - 1; f > 0; f--)
+                {
+                    int a = f * Plane;
+                    for (int i = 0; i < Plane; i++) if (rooms[a + i] != 0) return f;
+                }
+                return 0;
+            }
+        }
+
+        static int[] Expand(int[] a, int plane)
+        {
+            if (a == null) return new int[plane * MaxFloors];
+            if (a.Length >= plane * MaxFloors) return a;
+            var b = new int[plane * MaxFloors];
+            System.Array.Copy(a, b, Mathf.Min(a.Length, plane));
+            return b;
+        }
 
         /// <summary>Creates the site list for new games and for saves made before multi-site support.</summary>
         public void EnsureSites()
         {
-            if (flags == null || flags.Length != mapW * mapH) flags = new int[mapW * mapH];
+            rooms = Expand(rooms, mapW * mapH);
+            flags = Expand(flags, mapW * mapH);
             if (sites.Count == 0)
             {
                 var d = new SiteData();
@@ -294,7 +334,11 @@ namespace DCT
                 StoreTo(sites[bound]);
             }
             foreach (var s in sites)
-                if (s.flags == null || s.flags.Length != s.mapW * s.mapH) s.flags = new int[s.mapW * s.mapH];
+            {
+                s.rooms = Expand(s.rooms, s.mapW * s.mapH);
+                s.flags = Expand(s.flags, s.mapW * s.mapH);
+            }
+            if (bound >= 0) { rooms = sites[bound].rooms; flags = sites[bound].flags; }
         }
 
         /// <summary>Swaps the given site's data into the top-level fields so per-site code can run on it.</summary>
@@ -345,7 +389,7 @@ namespace DCT
         public int Level => Catalog.LevelFromXp(xp);
         public bool InBounds(int x, int y) => x >= 0 && y >= 0 && x < mapW && y < mapH;
         public bool Owned(int x, int y) => x >= ownX0 && x < ownX1 && y >= ownY0 && y < ownY1;
-        public RoomType Room(int x, int y) => InBounds(x, y) ? (RoomType)rooms[y * mapW + x] : RoomType.None;
+        public RoomType Room(int x, int y) => RoomAt(floor, x, y);
         public int NewId() => nextId++;
 
         public string DateString()

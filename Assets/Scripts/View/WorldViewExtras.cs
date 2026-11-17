@@ -53,18 +53,18 @@ namespace DCT
                 foreach (var o in sim.S.objects)
                 {
                     var d = Catalog.Facility(o.def);
-                    if (d.kind != FacilityKind.Rack || !views.TryGetValue(o.id, out var v)) continue;
+                    if (d.kind != FacilityKind.Rack || o.floor != sim.S.floor || !views.TryGetValue(o.id, out var v)) continue;
                     alive.Add(o.id);
                     if (!overlayMarkers.TryGetValue(o.id, out var go) || go == null)
                     {
                         go = new GameObject("Overlay");
-                        go.transform.SetParent(transform, false);
+                        go.transform.SetParent(floorRoot, false);
                         go.AddComponent<MeshFilter>().sharedMesh = markerMesh;
                         go.AddComponent<MeshRenderer>().sharedMaterial = new Material(transMat);
                         overlayMarkers[o.id] = go;
                     }
                     go.SetActive(true);
-                    go.transform.position = new Vector3(o.x + 0.14f, v.height + 0.01f, o.y + 0.03f);
+                    go.transform.localPosition = new Vector3(o.x + 0.14f, v.height + 0.01f, o.y + 0.03f);
                     go.transform.localScale = new Vector3(0.72f, 1, 0.94f);
                     var c = OverlayColor(o, d);
                     c.a = 0.85f;
@@ -158,8 +158,8 @@ namespace DCT
                     v.body = body.transform;
                     staffViews[m.id] = v;
                 }
-                v.go.SetActive(Settings.ShowStaff && m.state != "off");
-                var pos = new Vector3(Mathf.Lerp(m.px, m.x, t), 0, Mathf.Lerp(m.py, m.y, t));
+                v.go.SetActive(Settings.ShowStaff && m.state != "off" && m.floor == sim.S.floor);
+                var pos = new Vector3(Mathf.Lerp(m.px, m.x, t), m.floor * GameState.FloorHeight, Mathf.Lerp(m.py, m.y, t));
                 var delta = pos - v.lastPos;
                 if (delta.sqrMagnitude > 0.0001f) v.facing = Mathf.Atan2(delta.x, delta.z) * Mathf.Rad2Deg;
                 v.lastPos = pos;
@@ -274,7 +274,7 @@ namespace DCT
                     l.range = 6f;
                     fireLights[id] = l;
                 }
-                l.transform.position = new Vector3(o.x + 0.5f, 2.4f, o.y + 0.5f);
+                l.transform.position = new Vector3(o.x + 0.5f, 2.4f + o.floor * GameState.FloorHeight, o.y + 0.5f);
                 l.intensity = 3f + Mathf.PerlinNoise(Time.unscaledTime * 8f, id) * 4f;
             }
             foreach (var kv in fireLights.ToList())
