@@ -71,7 +71,16 @@ ports, research levels, etc.). Edit it and restart the game. `kind` and `room` a
 ```
 "C:\Program Files\Blender Foundation\Blender 5.2\blender.exe" -b --factory-startup -P Tools/blender/make_models.py -- "<project>/Assets/Resources/Models"
 ```
-Any facility without a model (or with the model file deleted) falls back to a procedural mesh.
+Add model names after the output folder to rebuild only those (e.g. `... -- "<out>" rack_std tree_pine`).
+Every facility, the three rack cabinets, staff, trees and rocks have models. A facility uses the model named by its
+`model` field, or its `id` when that is empty. Rack shells, trees, rocks and placement previews are baked into the
+game's vertex-colored meshes at runtime, so the models are imported with Read/Write enabled
+(`Assets/Editor/ModelImportSettings.cs`). Anything without a model falls back to a procedural mesh.
+
+To eyeball the models without opening Unity, render a preview PNG of each:
+```
+"C:\Program Files\Blender Foundation\Blender 5.2\blender.exe" -b --factory-startup -P Tools/blender/render_previews.py -- Assets/Resources/Models <out_dir>
+```
 
 ## Continuous integration
 `.github/workflows/tests.yml` runs the edit-mode tests with [GameCI](https://game.ci) on every push.

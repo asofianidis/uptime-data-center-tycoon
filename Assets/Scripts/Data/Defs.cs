@@ -148,7 +148,7 @@ namespace DCT
                 desc = "Distributes 1.5 MW.", color = new Color(0.55f, 0.55f, 0.6f) },
             new FacilityDef { id = "ups", model = "ups", name = "UPS Battery Bank", kind = FacilityKind.Ups, room = RoomType.Power, cost = 11000, backupKW = 100, level = 1,
                 desc = "Rides through short grid outages for up to 100 kW of load. Needed for generators to take over.", color = new Color(0.2f, 0.22f, 0.25f) },
-            new FacilityDef { id = "ups_li", model = "ups", name = "Li-ion UPS", kind = FacilityKind.Ups, room = RoomType.Power, cost = 45000, backupKW = 500, level = 4, research = 60000,
+            new FacilityDef { id = "ups_li", model = "ups_li", name = "Li-ion UPS", kind = FacilityKind.Ups, room = RoomType.Power, cost = 45000, backupKW = 500, level = 4, research = 60000,
                 desc = "500 kW lithium-ion UPS.", color = new Color(0.15f, 0.25f, 0.3f) },
             new FacilityDef { id = "gen", model = "gen", name = "Diesel Generator", kind = FacilityKind.Generator, room = RoomType.Outdoor, w = 2, h = 1, cost = 34000, backupKW = 300, level = 2, research = 10000,
                 desc = "Outdoor backup generator, 300 kW. Covers long outages together with UPS.", color = new Color(0.9f, 0.75f, 0.15f) },

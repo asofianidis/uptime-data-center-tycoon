@@ -76,6 +76,86 @@ namespace DCT
             }
         }
 
+        class ModelParts
+        {
+            public Matrix4x4 local;
+            public Vector3[] verts, normals;
+            public int[][] tris;
+            public Color[] colors;
+            public string[] names;
+        }
+        static readonly Dictionary<GameObject, List<ModelParts>> modelCache = new Dictionary<GameObject, List<ModelParts>>();
+
+        /// <summary>Front-facing rotation for Blender models (exported with their front at +Z; the game's front is -Z).</summary>
+        public static readonly Quaternion ModelFlip = Quaternion.Euler(0, 180f, 0);
+
+        static List<ModelParts> PartsOf(GameObject prefab)
+        {
+            if (modelCache.TryGetValue(prefab, out var parts)) return parts;
+            parts = new List<ModelParts>();
+            var root = prefab.transform;
+            var rootScale = Matrix4x4.Scale(root.localScale);
+            foreach (var mf in prefab.GetComponentsInChildren<MeshFilter>(true))
+            {
+                var mesh = mf.sharedMesh;
+                if (mesh == null || !mesh.isReadable) continue;
+                var mats = mf.GetComponent<MeshRenderer>()?.sharedMaterials ?? new Material[0];
+                var p = new ModelParts
+                {
+                    local = rootScale * root.worldToLocalMatrix * mf.transform.localToWorldMatrix,
+                    verts = mesh.vertices,
+                    normals = mesh.normals,
+                    tris = new int[mesh.subMeshCount][],
+                    colors = new Color[mesh.subMeshCount],
+                    names = new string[mesh.subMeshCount],
+                };
+                for (int s = 0; s < mesh.subMeshCount; s++)
+                {
+                    p.tris[s] = mesh.GetTriangles(s);
+                    var m = s < mats.Length ? mats[s] : null;
+                    Color c = m != null && (m.HasProperty("_BaseColor") || m.HasProperty("_Color")) ? m.color : Color.gray;
+                    c.a = 1f;
+                    bool emissive = m != null && m.HasProperty("_EmissionColor") && m.GetColor("_EmissionColor").maxColorComponent > 0.01f;
+                    p.colors[s] = emissive ? Led(c) : c;
+                    p.names[s] = m != null ? m.name : "";
+                }
+                parts.Add(p);
+            }
+            modelCache[prefab] = parts;
+            return parts;
+        }
+
+        /// <summary>True if the prefab's meshes can be baked (imported with Read/Write enabled).</summary>
+        public static bool CanAppend(GameObject prefab) => prefab != null && PartsOf(prefab).Count > 0;
+
+        /// <summary>Bakes a Blender model into this mesh, turning each material into vertex colors.
+        /// <paramref name="recolor"/> can override a color by material name (e.g. random foliage tints).</summary>
+        public void AppendModel(GameObject prefab, Matrix4x4 m, System.Func<string, Color, Color> recolor = null)
+        {
+            foreach (var p in PartsOf(prefab))
+            {
+                var xf = m * p.local;
+                for (int s = 0; s < p.tris.Length; s++)
+                {
+                    Color c = recolor != null ? recolor(p.names[s], p.colors[s]) : p.colors[s];
+                    // Submeshes share the vertex array; copy just the vertices this submesh uses.
+                    var remap = new Dictionary<int, int>();
+                    foreach (int t in p.tris[s])
+                    {
+                        if (!remap.TryGetValue(t, out int ni))
+                        {
+                            ni = verts.Count;
+                            remap[t] = ni;
+                            verts.Add(xf.MultiplyPoint3x4(p.verts[t]));
+                            normals.Add(p.normals.Length > t ? xf.MultiplyVector(p.normals[t]).normalized : Vector3.up);
+                            colors.Add(c);
+                        }
+                        tris.Add(ni);
+                    }
+                }
+            }
+        }
+
         public static Color Shade(Color c, float f) => new Color(c.r * f, c.g * f, c.b * f, c.a);
 
         public static Color Led(Color c) => new Color(c.r, c.g, c.b, 0f);

@@ -589,7 +589,7 @@ namespace DCT
             if (ghostDef != d.id || ghostRot != rot)
             {
                 var mb = new MeshBuilder();
-                Models.Build(mb, d, null, sim);
+                Models.BuildPreview(mb, d, sim);
                 Simulation.Footprint(d, 0, out int w, out int h);
                 mb.FlatQuad(-w * 0.5f, -h * 0.5f, w * 0.5f, h * 0.5f, 0.04f, Color.white);
                 mb.ToMesh(ghostMesh);

@@ -910,7 +910,7 @@
             "rackU": 0,
             "rackKW": 0.0,
             "staff": 0,
-            "model": "ups",
+            "model": "ups_li",
             "capacityKWh": 0.0,
             "level": 4,
             "research": 60000.0,

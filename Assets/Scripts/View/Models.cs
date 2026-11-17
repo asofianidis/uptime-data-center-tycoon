@@ -9,6 +9,23 @@ namespace DCT
 
         public static float RackHeight(FacilityDef d) => d.rackU * UHeight + 0.12f;
 
+        public static string ModelName(FacilityDef d) => string.IsNullOrEmpty(d.model) ? d.id : d.model;
+
+        /// <summary>Static preview geometry for placement ghosts: the Blender model if there is one, else the procedural mesh.</summary>
+        public static float BuildPreview(MeshBuilder mb, FacilityDef d, Simulation sim)
+        {
+            if (d.kind != FacilityKind.Rack)
+            {
+                var model = ModelLibrary.Get(ModelName(d));
+                if (MeshBuilder.CanAppend(model))
+                {
+                    mb.AppendModel(model, Matrix4x4.Rotate(MeshBuilder.ModelFlip));
+                    return 1f;
+                }
+            }
+            return Build(mb, d, null, sim);
+        }
+
         public static float Build(MeshBuilder mb, FacilityDef d, PlacedObject o, Simulation sim)
         {
             switch (d.kind)
@@ -36,13 +53,18 @@ namespace DCT
             float H = RackHeight(d);
             float W = 0.64f, D = 0.92f;
             Color frame = d.color;
-            // Plinth + main body
-            mb.Box(new Vector3(0, 0.03f, 0), new Vector3(W, 0.06f, D), MeshBuilder.Shade(frame, 0.6f));
-            mb.Box(new Vector3(0, H * 0.5f + 0.03f, 0), new Vector3(W, H - 0.06f, D), frame);
-            // Side rails on the front
             float fz = -D * 0.5f - 0.012f;
-            mb.Box(new Vector3(-W * 0.5f + 0.03f, H * 0.5f, fz), new Vector3(0.04f, H - 0.06f, 0.025f), MeshBuilder.Shade(frame, 1.6f));
-            mb.Box(new Vector3(W * 0.5f - 0.03f, H * 0.5f, fz), new Vector3(0.04f, H - 0.06f, 0.025f), MeshBuilder.Shade(frame, 1.6f));
+            // Cabinet shell: the Blender model when available, otherwise a plain box with front rails.
+            var shell = ModelLibrary.Get(ModelName(d));
+            if (MeshBuilder.CanAppend(shell))
+                mb.AppendModel(shell, Matrix4x4.Rotate(MeshBuilder.ModelFlip));
+            else
+            {
+                mb.Box(new Vector3(0, 0.03f, 0), new Vector3(W, 0.06f, D), MeshBuilder.Shade(frame, 0.6f));
+                mb.Box(new Vector3(0, H * 0.5f + 0.03f, 0), new Vector3(W, H - 0.06f, D), frame);
+                mb.Box(new Vector3(-W * 0.5f + 0.03f, H * 0.5f, fz), new Vector3(0.04f, H - 0.06f, 0.025f), MeshBuilder.Shade(frame, 1.6f));
+                mb.Box(new Vector3(W * 0.5f - 0.03f, H * 0.5f, fz), new Vector3(0.04f, H - 0.06f, 0.025f), MeshBuilder.Shade(frame, 1.6f));
+            }
 
             Contract c = o != null && o.contractId > 0 ? sim?.FindContract(o.contractId) : null;
             Color cust = c != null ? Catalog.CustomerColors[c.colorIdx] : new Color(0.3f, 0.3f, 0.32f);
@@ -328,9 +350,19 @@ namespace DCT
         public static void Tree(MeshBuilder mb, Vector3 p, System.Random r)
         {
             float s = 0.7f + (float)r.NextDouble() * 0.6f;
-            mb.Prism(p, 0.08f * s, 0.06f * s, 0.5f * s, 6, new Color(0.38f, 0.26f, 0.16f));
             Color leaf = new Color(0.16f + (float)r.NextDouble() * 0.1f, 0.38f + (float)r.NextDouble() * 0.15f, 0.14f);
-            if (r.NextDouble() < 0.5)
+            bool pine = r.NextDouble() < 0.5;
+            var model = ModelLibrary.Get(pine ? "tree_pine" : "tree_round");
+            if (MeshBuilder.CanAppend(model))
+            {
+                // Random yaw, scale and foliage tint so a forest of two models doesn't look copy-pasted.
+                float tint = 0.75f + (float)r.NextDouble() * 0.25f;
+                var m = Matrix4x4.TRS(p, Quaternion.Euler(0, (float)r.NextDouble() * 360f, 0), new Vector3(s, s * (0.9f + (float)r.NextDouble() * 0.25f), s));
+                mb.AppendModel(model, m, (name, c) => name.StartsWith("Leaf") ? new Color(c.r * tint * leaf.r / 0.2f, c.g * tint * leaf.g / 0.45f, c.b * tint, c.a) : c);
+                return;
+            }
+            mb.Prism(p, 0.08f * s, 0.06f * s, 0.5f * s, 6, new Color(0.38f, 0.26f, 0.16f));
+            if (pine)
             {
                 mb.Prism(p + Vector3.up * 0.35f * s, 0.45f * s, 0.0f, 0.8f * s, 7, leaf);
                 mb.Prism(p + Vector3.up * 0.75f * s, 0.32f * s, 0.0f, 0.7f * s, 7, MeshBuilder.Shade(leaf, 1.1f));
@@ -347,6 +379,13 @@ namespace DCT
             float s = 0.5f + (float)r.NextDouble() * 0.4f;
             Color c = new Color(0.45f, 0.45f, 0.47f) * (0.85f + (float)r.NextDouble() * 0.3f);
             c.a = 1;
+            var model = ModelLibrary.Get(r.NextDouble() < 0.5 ? "rock" : "rock_b");
+            if (MeshBuilder.CanAppend(model))
+            {
+                float k = s * 1.4f;
+                mb.AppendModel(model, Matrix4x4.TRS(p, Quaternion.Euler(0, (float)r.NextDouble() * 360f, 0), new Vector3(k, k, k)));
+                return;
+            }
             mb.Prism(p, 0.4f * s, 0.22f * s, 0.32f * s, 6, c);
         }
     }
