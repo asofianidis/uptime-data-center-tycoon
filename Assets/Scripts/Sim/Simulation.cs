@@ -138,7 +138,7 @@ namespace DCT
             var s = new GameState { seed = seed, difficulty = difficulty };
             s.city = ProcGen.GenerateCity(r);
             ProcGen.GenerateLot(s, r);
-            s.money = difficulty == "Easy" ? 450000 : difficulty == "Hard" ? 160000 : 275000;
+            s.money = difficulty == "Easy" ? 550000 : difficulty == "Hard" ? 200000 : 350000;
             s.rating = difficulty == "Hard" ? 40 : 50;
             s.hour = 8;
             s.nextOfferHour = s.hour + 24;
