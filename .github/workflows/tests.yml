@@ -41,7 +41,7 @@ jobs:
         if: steps.license.outputs.available == 'true'
         uses: game-ci/unity-test-runner@v4
         with:
-          unityVersion: 6000.6.7f1
+          unityVersion: 6000.6.9f1
           testMode: editmode
           githubToken: ${{ secrets.GITHUB_TOKEN }}
           checkName: Edit-mode test results

@@ -1,10 +1,10 @@
-# Uptime – Data Center Tycoon (Unity 6000.6.7f1)
+# Uptime – Data Center Tycoon (Unity 6000.6.9f1)
 
 A top-down data center management game. Build a facility, wire power, cooling and networking,
 sign procedurally generated customer contracts, assign racks/servers to them, and keep them within SLA.
 
 ## Running
-- Open this folder in Unity Hub (6000.6.7f1), open `Assets/Scenes/Main.unity`, press Play.
+- Open this folder in Unity Hub (6000.6.9f1), open `Assets/Scenes/Main.unity`, press Play.
   (The game also self-boots from any scene via `GameManager.AutoBoot`.)
 - Or build the player: menu **Uptime → Build Windows Player** (outputs `Builds/Windows/Uptime.exe`).
 - Menu **Uptime/** also has: Setup Main Scene, Run Simulation Test, Export Catalog JSON, Check Models.
