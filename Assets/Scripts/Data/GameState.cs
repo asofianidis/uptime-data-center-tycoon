@@ -206,6 +206,8 @@ namespace DCT
         public int month;
         public float income, bonuses, penalties, power, network, salaries, capex, other;
         public float Net => income + bonuses - penalties - power - network - salaries - capex - other;
+        /// <summary>Profit from running the business, before construction and hardware purchases (investment).</summary>
+        public float Operating => income + bonuses - penalties - power - network - salaries - other;
     }
 
     [Serializable]

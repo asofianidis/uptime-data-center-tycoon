@@ -56,6 +56,13 @@ namespace DCT
             return root.panel.Pick(p) != null;
         }
 
+        /// <summary>Drops UI keyboard focus (e.g. a text field) so hotkeys work again after clicking the world.</summary>
+        public void ClearFocus()
+        {
+            root?.panel?.focusController?.focusedElement?.Blur();
+            textFocus = false;
+        }
+
         public void Toast(string text, int sev)
         {
             if (toastBox == null) return;
@@ -116,6 +123,12 @@ namespace DCT
             var uss = Resources.Load<StyleSheet>("UI/Uptime");
             if (uss != null) root.styleSheets.Add(uss);
             root.pickingMode = PickingMode.Ignore;
+            // Space is also the legacy "Submit" axis: without this, pressing Pause re-clicks the last focused
+            // button (e.g. the 1x speed button), which immediately undoes the pause.
+            root.RegisterCallback<NavigationSubmitEvent>(e =>
+            {
+                if (!textFocus && (Settings.Held("Pause") || Settings.Down("Pause"))) e.StopImmediatePropagation();
+            }, TrickleDown.TrickleDown);
 
             worldLayer = Layer("world-labels");
             hudLayer = Layer("hud");

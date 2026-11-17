@@ -557,7 +557,7 @@ namespace DCT
                 if (!dragging) { view.HideGhost(); }
                 return;
             }
-            if (Input.GetMouseButtonDown(0) || Input.GetMouseButtonDown(1)) GUIUtility.keyboardControl = 0;
+            if (Input.GetMouseButtonDown(0) || Input.GetMouseButtonDown(1)) { GUIUtility.keyboardControl = 0; ui.ClearFocus(); }
             if (!cam.MouseGround(out var gp)) return;
             var tile = new Vector2Int(Mathf.FloorToInt(gp.x), Mathf.FloorToInt(gp.z));
             hoverTile = tile;

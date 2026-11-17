@@ -833,7 +833,7 @@ namespace DCT
                 S.reports.Add(S.current);
                 if (S.reports.Count > 36) S.reports.RemoveAt(0);
                 var r = S.current;
-                Log($"Month closed. Net: {(r.Net >= 0 ? "+" : "-")}${Mathf.Abs(r.Net):N0}", r.Net >= 0 ? 1 : 2);
+                Log($"Month closed. Operating profit: {(r.Operating >= 0 ? "+" : "-")}${Mathf.Abs(r.Operating):N0}" + (r.capex > 0 ? $" (invested ${r.capex:N0} in construction & hardware)" : ""), r.Operating >= 0 ? 1 : 2);
                 S.current = new MonthReport { month = S.Month };
                 AutoSaveRequested = true;
             }

@@ -35,7 +35,26 @@ namespace DCT
             else K.Text(head, $"{sel.Count} objects selected", "header");
             K.Flex(head);
             K.Small(head, "x", () => gm.selection.Clear());
+            // The inspector is rebuilt whenever its signature changes (buying a device, assigning, cabling...).
+            // Keep the scroll position across rebuilds of the same selection so the panel doesn't jump to the top.
+            string selKey = string.Join(",", sel.Select(o => o.id));
+            float keepY = inspectorScroll != null && selKey == inspectorScrollKey ? inspectorScroll.scrollOffset.y : 0f;
             var sv = K.Scroll(p);
+            inspectorScroll = sv;
+            inspectorScrollKey = selKey;
+            if (keepY > 0f)
+            {
+                EventCallback<GeometryChangedEvent> restore = null;
+                // Layout runs after the build, so the offset is clamped to 0 until the content has a size.
+                // Re-apply it as the content lays out, then stop (shortly after) so user scrolling isn't overridden.
+                restore = e =>
+                {
+                    sv.scrollOffset = new Vector2(0, keepY);
+                    if (sv.scrollOffset.y >= keepY - 0.5f) sv.contentContainer.UnregisterCallback(restore);
+                };
+                sv.contentContainer.RegisterCallback(restore);
+                sv.schedule.Execute(() => sv.contentContainer.UnregisterCallback(restore)).ExecuteLater(250);
+            }
             var c = sv.contentContainer;
             if (sel.Count == 1)
             {
@@ -46,6 +65,9 @@ namespace DCT
             }
             else MultiInspector(c, s, sel);
         }
+
+        ScrollView inspectorScroll;
+        string inspectorScrollKey;
 
         RackInfo Info(PlacedObject o) => Sim.racks.TryGetValue(o.id, out var i) ? i : null;
 

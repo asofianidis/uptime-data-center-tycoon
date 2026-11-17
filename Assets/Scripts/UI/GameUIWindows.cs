@@ -316,25 +316,27 @@ namespace DCT
             Row("ISP transit fees", () => S.current.network, true);
             Row("Salaries", () => S.current.salaries, true);
             Row("Repairs, research & hiring", () => S.current.other, true);
+            var op = K.Text(s, left, () => $"Operating profit: {K.Money(S.current.Operating)}", "bold");
+            K.DynClass(s, op, () => S.current.Operating >= 0 ? "good" : "bad");
             Row("Construction & hardware", () => S.current.capex, true);
-            var net = K.Text(s, left, () => $"Net: {K.Money(S.current.Net)}", "bold");
-            K.DynClass(s, net, () => S.current.Net >= 0 ? "good" : "bad");
+            var net = K.Text(s, left, () => $"Cash flow after investment: {K.Money(S.current.Net)}", "small");
+            K.DynClass(s, net, () => S.current.Net >= 0 ? "good" : "dim");
 
             var right = K.Card(top);
             right.style.flexGrow = 1;
             K.Text(right, "Operations", "bold");
             K.Text(s, right, () => $"Recurring revenue: {K.Money(Sim.MonthlyRevenue)}/mo", "good");
-            K.Text(s, right, () => $"Power at current load: {K.Money(Sim.company.sims.Sum(x => x.gridKW) * S.city.powerPrice * Catalog.HoursPerMonth)}/mo ({Sim.company.TotalLoadKW:0.0} kW across sites)", "wrap");
+            K.Text(s, right, () => $"Power at current load: {K.Money(Sim.company.sims.Sum(x => x.gridKW) * (S.city.powerPrice + S.city.carbonTax) * Catalog.HoursPerMonth)}/mo ({Sim.company.TotalLoadKW:0.0} kW across sites)", "wrap");
             K.Text(s, right, () => $"ISP fees: {K.Money(S.sites.Sum(site => site.objects.Where(o => Catalog.Facility(o.def).kind == FacilityKind.Isp).Sum(o => Catalog.Facility(o.def).monthly)))}/mo");
             K.Text(s, right, () => $"Salaries: {K.Money(S.sites.Sum(site => site.staff.Sum(m => m.salary)))}/mo");
             K.Text(s, right, () => { float pue = Sim.itLoadKW > 0 ? Sim.loadKW / Sim.itLoadKW : 0; return $"PUE: {(pue > 0 ? pue.ToString("0.00") : "-")}   IT load {Sim.itLoadKW:0.0} kW (this site)"; });
             K.Text(s, right, () => $"Lifetime revenue: {K.Money(S.lifetimeRevenue)}");
             K.Text(right, $"Seed {S.seed}   {S.difficulty}   {Simulation.Scenario(S.scenario).name}", "dim");
 
-            K.Text(p, "Monthly net (last 12 months)", "bold");
+            K.Text(p, "Monthly operating profit, before construction & hardware (last 12 months)", "bold");
             var chart = new BarChart();
             chart.style.height = 190;
-            chart.data = () => S.reports.Skip(Mathf.Max(0, S.reports.Count - 12)).Select(x => x.Net).ToList();
+            chart.data = () => S.reports.Skip(Mathf.Max(0, S.reports.Count - 12)).Select(x => x.Operating).ToList();
             chart.labels = () => S.reports.Skip(Mathf.Max(0, S.reports.Count - 12)).Select(x => $"M{x.month + 1}").ToList();
             p.Add(chart);
             s.Add(chart.Refresh);
