@@ -8,7 +8,7 @@ Conventions: 1 unit = 1 m, origin at the footprint center on the floor, Z up, fr
 Exported with baked axis conversion so Unity sees Y up and the front facing -Z.
 """
 import bpy, bmesh, math, os, random, sys
-from mathutils import Vector
+from mathutils import Matrix, Vector
 
 _ARGS = sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else []
 OUT = _ARGS[0] if _ARGS else os.path.join(os.getcwd(), "Assets", "Resources", "Models")
@@ -118,6 +118,10 @@ def export(name):
     bpy.ops.object.join()
     obj = bpy.context.active_object
     obj.name = name
+    # The joined object inherits the first part's transform; bake it into the mesh so the pivot is
+    # the footprint center on the floor (the game treats the model root as the tile anchor).
+    obj.data.transform(obj.matrix_world)
+    obj.matrix_world = Matrix.Identity(4)
     path = os.path.join(OUT, name + ".fbx")
     bpy.ops.export_scene.fbx(
         filepath=path, use_selection=True, apply_unit_scale=True, apply_scale_options="FBX_SCALE_ALL",
