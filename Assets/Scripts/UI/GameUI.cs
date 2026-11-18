@@ -505,6 +505,17 @@ namespace DCT
             tooltip.style.display = DisplayStyle.None;
         }
 
+        string hoverTip;
+        VisualElement hoverTipEl;
+
+        /// <summary>Shows <paramref name="text"/> in the mouse tooltip while the pointer is over the element.</summary>
+        T Tip<T>(T e, string text) where T : VisualElement
+        {
+            e.RegisterCallback<PointerEnterEvent>(_ => { hoverTip = text; hoverTipEl = e; });
+            e.RegisterCallback<PointerLeaveEvent>(_ => { if (hoverTipEl == e) hoverTipEl = null; });
+            return e;
+        }
+
         void UpdateToasts()
         {
             float now = Time.unscaledTime;
@@ -526,6 +537,8 @@ namespace DCT
         {
             // Tool hint / hover tooltip near the mouse.
             string text = gm.toolHint;
+            if (hoverTipEl != null && hoverTipEl.panel == null) hoverTipEl = null;   // its section was rebuilt
+            if (text == null && hoverTipEl != null) text = hoverTip;
             if (text == null && gm.tool == Tool.Select && gm.hoverObject != null && !IsPointerOverUI())
             {
                 var o = gm.hoverObject;

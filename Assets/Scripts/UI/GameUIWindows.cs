@@ -31,7 +31,7 @@ namespace DCT
         void BuildWindow(VisualElement r, Scope s)
         {
             if (!PanelWindows.Contains(window)) return;
-            var p = K.Panel(r, "grow");
+            var p = K.Panel(r);
             var head = K.Row(p);
             K.Text(head, window switch
             {
@@ -107,33 +107,34 @@ namespace DCT
             return "";
         }
 
-        void ContractHeader(VisualElement p, Scope s, Contract c)
+        /// <summary>One line: customer, industry, trait chips (hover for what they mean), optional status text and the monthly pay.</summary>
+        void ContractHeader(VisualElement p, Scope s, Contract c, Func<string> extra = null)
         {
             var row = K.Row(p);
-            K.Swatch(row, Catalog.CustomerColors[c.colorIdx], 16);
-            K.Text(row, c.customer, "header");
-            K.Text(row, $"  {c.industry} - {Catalog.TypeName(c.type)}", "dim");
+            K.Swatch(row, Catalog.CustomerColors[c.colorIdx], 14);
+            var name = K.Text(row, c.customer, "card-title");
+            if (!string.IsNullOrEmpty(c.flavor)) Tip(name, c.flavor);
+            K.Text(row, $"{c.industry} - {Catalog.TypeName(c.type)}", "dim").style.marginRight = 6;
+            foreach (var t in c.traits) Tip(K.Text(row, t, "chip"), ProcGen.TraitDesc(t));
             K.Flex(row);
+            if (extra != null) K.Text(s, row, extra, "dim").style.marginRight = 8;
             K.Text(s, row, () => $"{K.Money(c.monthlyPay)}/mo", "big-pay");
         }
 
-        void Traits(VisualElement p, Contract c)
+        /// <summary>A labelled slot in a row of bars; the slots share the row's width equally.</summary>
+        static VisualElement BarCell(VisualElement row, string label)
         {
-            foreach (var t in c.traits)
-            {
-                var row = K.Row(p);
-                var chip = K.Text(row, t, "chip");
-                chip.style.width = 96;
-                chip.style.unityTextAlign = TextAnchor.MiddleCenter;
-                K.Text(row, ProcGen.TraitDesc(t), "dim");
-            }
+            var cell = K.Row(row);
+            cell.style.flexGrow = 1;
+            cell.style.flexBasis = 0;
+            cell.style.marginRight = 8;
+            K.Text(cell, label, "small", "dim").style.marginRight = 4;
+            return cell;
         }
 
-        void ReqBar(VisualElement p, Scope s, string label, Func<float> have, float need, string unit)
+        void ReqBar(VisualElement row, Scope s, string label, Func<float> have, float need, string unit)
         {
-            var row = K.Row(p);
-            K.Text(row, label, "small").style.width = 80;
-            K.Bar(s, row, () => need <= 0 ? 1 : have() / need, () => have() >= need - 0.001f ? new Color(0.3f, 0.85f, 0.4f) : new Color(1f, 0.55f, 0.2f), () => $"{have():0.#} / {need:0.#} {unit}");
+            K.Bar(s, BarCell(row, label), () => need <= 0 ? 1 : have() / need, () => have() >= need - 0.001f ? new Color(0.3f, 0.85f, 0.4f) : new Color(1f, 0.55f, 0.2f), () => $"{have():0.#} / {need:0.#} {unit}");
         }
 
         // ---------------------------------------------------------------- market
@@ -157,22 +158,21 @@ namespace DCT
             int tab = Tabs(p, windowSection, "market", labels.ToArray());
             var shown = S.offers.Where(o => tab == 0 || o.type == types[tab - 1]).ToList();
 
-            var sv = K.Scroll(p);
+            var sv = K.Scroll(p, "fit");
             if (shown.Count == 0) K.Text(sv.contentContainer, S.offers.Count == 0 ? "No offers right now. New customers will call soon." : "No offers of this type right now.", "dim");
             foreach (var c in shown)
             {
                 var con = c;
                 var card = K.Card(sv.contentContainer);
-                ContractHeader(card, s, c);
-                K.Text(card, c.flavor, "dim");
-                K.Text(card, "Requires: " + Requirement(c), "bold");
-                K.Text(card, $"SLA {c.sla}% uptime    Term: {c.months} months    Setup window: {c.setupDays} days    Signing bonus: {K.Money(c.signingBonus)}");
-                Traits(card, c);
-                string est = Estimate(c);
-                K.Text(card, est.StartsWith("!") ? est.Substring(1) : "Estimate: " + est, est.StartsWith("!") ? "bad" : "dim");
+                ContractHeader(card, s, c, () => $"expires in {HoursToText(con.expiresHour - S.hour)}");
+                var terms = K.Row(card);
+                terms.style.flexWrap = Wrap.Wrap;
+                K.Text(terms, "Requires: " + Requirement(c), "bold").style.marginRight = 14;
+                K.Text(terms, $"SLA {c.sla}%   Term {c.months} months   Setup {c.setupDays} days   Signing bonus {K.Money(c.signingBonus)}");
                 var row = K.Row(card);
-                K.Text(s, row, () => $"Offer expires in {HoursToText(con.expiresHour - S.hour)}", "dim");
-                K.Flex(row);
+                string est = Estimate(c);
+                var el = K.Text(row, est.StartsWith("!") ? est.Substring(1) : "Estimate: " + est, est.StartsWith("!") ? "bad" : "dim");
+                el.style.flexGrow = 1; el.style.flexShrink = 1; el.style.flexBasis = 0;
                 if (!c.negotiated)
                 {
                     K.Small(row, "Ask +15% pay", () => Toast(Sim.Negotiate(con, "pay"), 0));
@@ -180,8 +180,8 @@ namespace DCT
                     if (c.sla > 99f) K.Small(row, "Ask lower SLA", () => Toast(Sim.Negotiate(con, "sla"), 0));
                 }
                 else K.Text(row, "Negotiated", "dim");
-                K.Btn(row, "Decline", () => Sim.DeclineOffer(con)).style.width = 90;
-                K.Btn(row, "Accept contract", () => Sim.AcceptOffer(con), "on").style.width = 150;
+                K.Small(row, "Decline", () => Sim.DeclineOffer(con));
+                K.Small(row, "Accept contract", () => Sim.AcceptOffer(con), "on");
             }
         }
 
@@ -196,7 +196,7 @@ namespace DCT
             int tab = Tabs(p, windowSection, "contracts", live.Count == 0 && setup.Count > 0 ? 2 : 0, out var bar,
                 $"Live ({live.Count})", $"Needs attention ({attention.Count})", $"Setting up ({setup.Count})", $"History ({past.Count})");
             K.Text(s, bar, () => $"Completed {S.contractsCompleted}   Failed {S.contractsFailed}", "dim");
-            var sv = K.Scroll(p);
+            var sv = K.Scroll(p, "fit");
             var c0 = sv.contentContainer;
             if (tab == 3)
             {
@@ -218,20 +218,23 @@ namespace DCT
                 var con = c;
                 var card = K.Card(c0);
                 ContractHeader(card, s, c);
-                K.Text(card, $"Requires: {Requirement(c)}    SLA {c.sla}%");
-                Traits(card, c);
+                // Requirements on the left, the contract's actions (added further down) on the right.
+                var act = K.Row(card);
+                var req = K.Text(act, $"Requires: {Requirement(c)}    SLA {c.sla}%", "small", "wrap");
+                req.style.flexGrow = 1; req.style.flexShrink = 1; req.style.flexBasis = 0;
+                var bars = K.Row(card);
                 Provision P() => Sim.provision.TryGetValue(con.id, out var pv) ? pv : new Provision();
                 switch (c.type)
                 {
-                    case ContractType.Colocation: ReqBar(card, s, "Racks", () => P().racks, c.reqRacks, "online"); break;
-                    case ContractType.Dedicated: ReqBar(card, s, "Servers", () => P().qualServers, c.reqServers, $"({c.reqCoresPerServer}+ cores)"); break;
-                    case ContractType.Compute: ReqBar(card, s, "Cores", () => P().cores, c.reqCores, "cores"); break;
-                    case ContractType.Storage: ReqBar(card, s, "Storage", () => P().storage, c.reqStorageTB, "TB"); break;
-                    case ContractType.GpuCloud: ReqBar(card, s, "GPUs", () => P().gpus, c.reqGpus, "GPUs"); break;
+                    case ContractType.Colocation: ReqBar(bars, s, "Racks", () => P().racks, c.reqRacks, "online"); break;
+                    case ContractType.Dedicated: ReqBar(bars, s, "Servers", () => P().qualServers, c.reqServers, $"({c.reqCoresPerServer}+ cores)"); break;
+                    case ContractType.Compute: ReqBar(bars, s, "Cores", () => P().cores, c.reqCores, "cores"); break;
+                    case ContractType.Storage: ReqBar(bars, s, "Storage", () => P().storage, c.reqStorageTB, "TB"); break;
+                    case ContractType.GpuCloud: ReqBar(bars, s, "GPUs", () => P().gpus, c.reqGpus, "GPUs"); break;
                 }
-                ReqBar(card, s, "Bandwidth", () => P().bandwidth, c.reqBandwidth, "Gbps");
-                var sat = K.Row(card);
-                K.Text(sat, "Satisfaction", "small").style.width = 80;
+                ReqBar(bars, s, "Bandwidth", () => P().bandwidth, c.reqBandwidth, "Gbps");
+                var sat = BarCell(bars, "Satisfaction");
+                sat.style.marginRight = 0;
                 K.Bar(s, sat, () => con.satisfaction / 100f,
                     () => con.satisfaction >= 70 ? new Color(0.3f, 0.85f, 0.4f) : con.satisfaction >= 40 ? new Color(1f, 0.75f, 0.2f) : new Color(1f, 0.3f, 0.25f),
                     () => $"{con.satisfaction:0}/100" + (con.satisfaction < 35 ? "  - at risk of leaving for a rival!" : con.satisfaction > 75 ? "  - may refer new customers" : ""));
@@ -253,16 +256,14 @@ namespace DCT
                 }
                 var st = K.Text(s, card, () =>
                 {
-                    if (con.status == ContractStatus.Setup) return $"SETTING UP - deadline in {HoursToText(con.deadlineHour - S.hour)}. Goes live automatically once requirements are met.";
+                    int racks = Sim.company.AllRacks().Count(x => x.rack.contractId == con.id);
+                    if (con.status == ContractStatus.Setup) return $"SETTING UP - deadline in {HoursToText(con.deadlineHour - S.hour)}. Goes live automatically once requirements are met.   {racks} rack(s) assigned";
                     float mu = Sim.Uptime(con, true);
-                    return $"Month {con.monthsServed + 1}/{con.months}   This month uptime {mu:0.000}% (SLA {con.sla}%)   Overall {Sim.Uptime(con, false):0.00}%   Breaches {con.breaches}/{(con.traits.Contains("Strict") ? 2 : 3)}   Earned {K.Money(con.earned)}";
+                    return $"Month {con.monthsServed + 1}/{con.months}   This month uptime {mu:0.000}% (SLA {con.sla}%)   Overall {Sim.Uptime(con, false):0.00}%   Breaches {con.breaches}/{(con.traits.Contains("Strict") ? 2 : 3)}   Earned {K.Money(con.earned)}   {racks} rack(s) assigned";
                 }, "small", "wrap");
                 K.DynClass(s, st, () => con.status == ContractStatus.Setup ? "warn" : Sim.Uptime(con, true) < con.sla ? "bad" : null);
-                var prob = K.Text(s, card, () => !string.IsNullOrEmpty(con.lastIssue) && !con.meeting ? "Problem: " + con.lastIssue : "", "bad");
+                var prob = K.Text(s, card, () => !string.IsNullOrEmpty(con.lastIssue) && !con.meeting ? "Problem: " + con.lastIssue : "", "small", "bad");
                 K.Show(s, prob, () => prob.text.Length > 0);
-                var act = K.Row(card);
-                K.Text(s, act, () => $"{Sim.company.AllRacks().Count(x => x.rack.contractId == con.id)} rack(s) assigned", "dim");
-                K.Flex(act);
                 K.Small(s, act, () => $"Assign {gm.selection.Count(o => Catalog.Facility(o.def).kind == FacilityKind.Rack)} selected rack(s)", () =>
                 {
                     foreach (var rk in gm.selection.Where(o => Catalog.Facility(o.def).kind == FacilityKind.Rack).ToList()) { var e = Sim.Assign(rk, con); if (e != null) { Toast(e, 2); break; } }
@@ -282,7 +283,7 @@ namespace DCT
             string Ready(int t) { int n = ResearchItems(t).Count(it => !Sim.IsUnlocked(it.id) && S.Level >= it.level); return n > 0 ? $" ({n})" : ""; }
             var labels = new[] { "Servers & Switches" }.Concat(BuildTabs).Select((name, i) => name + Ready(i)).ToArray();
             int tab = Tabs(p, windowSection, "research", labels);
-            var sv = K.Scroll(p);
+            var sv = K.Scroll(p, "fit");
             var all = ResearchItems(tab);
             if (all.Count == 0) K.Text(sv.contentContainer, "Nothing to research in this category.", "dim");
             for (int lvl = 1; lvl <= Catalog.MaxLevel; lvl++)
@@ -296,12 +297,12 @@ namespace DCT
                     var item = it;
                     bool done = Sim.IsUnlocked(it.id);
                     var row = K.Row(sv.contentContainer, "card");
-                    var col = K.Div(row, "grow");
-                    col.style.flexShrink = 1;
-                    K.Text(col, $"{it.name}   <{it.kind}>", done ? "good" : reached ? "bold" : "dim");
-                    K.Text(col, it.desc, "dim");
-                    if (done) K.Text(row, "Unlocked", "good");
-                    else K.Btn(s, row, () => $"Research {K.Money(item.cost)}", () => Report(Sim.Research(item.id)), () => S.Level >= lvl && S.money >= item.cost).style.width = 170;
+                    K.Text(row, it.name, "wrap", done ? "good" : reached ? "bold" : "dim").style.width = 210;
+                    K.Text(row, it.kind, "small", "dim").style.width = 100;
+                    var desc = K.Text(row, it.desc, "dim");
+                    desc.style.flexGrow = 1; desc.style.flexShrink = 1; desc.style.flexBasis = 0;
+                    if (done) K.Text(row, "Unlocked", "small", "good");
+                    else K.Small(s, row, () => $"Research {K.Money(item.cost)}", () => Report(Sim.Research(item.id)), () => S.Level >= lvl && S.money >= item.cost).style.width = 150;
                 }
             }
         }
@@ -370,7 +371,7 @@ namespace DCT
             p.Add(chart);
             s.Add(chart.Refresh);
             if (S.reports.Count == 0) { K.Text(p, "No completed months yet.", "dim"); return; }
-            var sv = K.Scroll(p);
+            var sv = K.Scroll(p, "fit");
             var hr = K.Row(sv.contentContainer);
             foreach (var h in new[] { "Month", "Income", "Running costs", "Operating", "Investment", "Cash flow" }) K.Text(hr, h, "bold", "small").style.width = 130;
             foreach (var rp in Enumerable.Reverse(S.reports.Skip(Mathf.Max(0, S.reports.Count - 24)).ToList()))
@@ -391,7 +392,7 @@ namespace DCT
         {
             int staffTab = Tabs(p, windowSection, "staff", out var tabs, $"Team ({S.staff.Count})", $"Hire ({S.candidates.Count})", "Roles", "Land");
             K.Text(s, tabs, () => $"Desks {Sim.deskCount}   Day {Sim.ShiftCount("Day")}  Night {Sim.ShiftCount("Night")}   Payroll {K.Money(S.staff.Sum(m => m.salary))}/mo", "dim");
-            var sv = K.Scroll(p);
+            var sv = K.Scroll(p, "fit");
             var c = sv.contentContainer;
             if (staffTab == 0)
             {
@@ -490,7 +491,7 @@ namespace DCT
         void LogWindow(VisualElement p, Scope s)
         {
             int tab = Tabs(p, windowSection, "log", "All", "Problems", "Warnings", "Good news");
-            var sv = K.Scroll(p);
+            var sv = K.Scroll(p, "fit");
             int shown = 0;
             for (int i = S.log.Count - 1; i >= 0 && shown < 200; i--)
             {
@@ -511,7 +512,7 @@ namespace DCT
         void GoalsWindow(VisualElement p, Scope s)
         {
             int tab = Tabs(p, windowSection, "goals", "Overview", $"Achievements ({S.achievements.Count}/{Simulation.Achievements.Count})");
-            var sv = K.Scroll(p);
+            var sv = K.Scroll(p, "fit");
             var c = sv.contentContainer;
             if (tab == 1)
             {
@@ -553,29 +554,27 @@ namespace DCT
         void DashboardWindow(VisualElement p, Scope s)
         {
             K.Text(s, p, () => $"Last {S.dayStats.Count} days.   PUE {(Sim.itLoadKW > 0 ? (Sim.loadKW / Sim.itLoadKW).ToString("0.00") : "-")}   Solar now {Sim.solarKW:0}/{Sim.solarCapKW:0} kW   Grid price now ${Sim.PowerPriceNow:0.000}/kWh (+${S.city.carbonTax:0.000} carbon)", "dim");
-            int tab = Tabs(p, windowSection, "dashboard", "Business", "Operations");
-            var sv = K.Scroll(p);
-            var col = sv.contentContainer;
+            // All six charts at once, three to a row.
+            var grid = K.Row(p);
+            grid.style.flexWrap = Wrap.Wrap;
+            grid.style.marginRight = -6;
             void Chart(string title, Func<DayStat, float> f, Color color, string fmt)
             {
-                K.Text(col, title, "bold");
+                var cell = K.Div(grid);
+                cell.style.width = Length.Percent(33.33f);
+                cell.style.paddingRight = 6;
+                K.Text(cell, title, "small", "bold");
                 var ch = new LineChart { color = color, format = fmt, data = () => S.dayStats.Select(f).ToList() };
-                ch.style.height = 150;
-                col.Add(ch);
+                ch.style.height = 120;
+                cell.Add(ch);
                 s.Add(ch.Refresh);
             }
-            if (tab == 0)
-            {
-                Chart("Cash", d => d.money, new Color(0.4f, 1f, 0.5f), "${0:N0}");
-                Chart("Monthly recurring revenue", d => d.revenue, new Color(0.4f, 0.7f, 1f), "${0:N0}");
-                Chart("Daily operating cost", d => d.cost, new Color(1f, 0.4f, 0.4f), "${0:N0}");
-            }
-            else
-            {
-                Chart("Facility load (all sites)", d => d.loadKW, new Color(1f, 0.6f, 0.3f), "{0:0} kW");
-                Chart("Avg customer service level", d => d.uptime, new Color(1f, 0.85f, 0.3f), "{0:0.0}%");
-                Chart("Hottest hall", d => d.temp, new Color(1f, 0.5f, 0.2f), "{0:0.0} C");
-            }
+            Chart("Cash", d => d.money, new Color(0.4f, 1f, 0.5f), "${0:N0}");
+            Chart("Monthly recurring revenue", d => d.revenue, new Color(0.4f, 0.7f, 1f), "${0:N0}");
+            Chart("Daily operating cost", d => d.cost, new Color(1f, 0.4f, 0.4f), "${0:N0}");
+            Chart("Facility load (all sites)", d => d.loadKW, new Color(1f, 0.6f, 0.3f), "{0:0} kW");
+            Chart("Avg customer service level", d => d.uptime, new Color(1f, 0.85f, 0.3f), "{0:0.0}%");
+            Chart("Hottest hall", d => d.temp, new Color(1f, 0.5f, 0.2f), "{0:0.0} C");
         }
 
         // ---------------------------------------------------------------- sites
@@ -584,7 +583,7 @@ namespace DCT
             var co = Sim.company;
             var cands = co.SiteCandidates().ToList();
             int tab = Tabs(p, windowSection, "sites", $"Your sites ({co.sims.Count})", $"Expand ({cands.Count})");
-            var sv = K.Scroll(p);
+            var sv = K.Scroll(p, "fit");
             var c = sv.contentContainer;
             for (int i = 0; tab == 0 && i < co.sims.Count; i++)
             {
@@ -632,7 +631,7 @@ namespace DCT
         {
             K.Text(p, "Creative mode: change the rules and poke the simulation. Achievements are disabled for this game.", "dim");
             int tab = Tabs(p, windowSection, "sandbox", "Rules & Money", "World", "Events");
-            var sv = K.Scroll(p);
+            var sv = K.Scroll(p, "fit");
             var c = sv.contentContainer;
             if (tab == 1) { SandboxWorld(c); return; }
             if (tab == 2) { SandboxEvents(c); return; }

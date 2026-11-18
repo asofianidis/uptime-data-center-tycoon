@@ -128,6 +128,10 @@ namespace DCT
             yield return Shot("07_goals");
             ui.OpenWindow(GameUI.Window.Dashboard);
             yield return Shot("08_dashboard");
+            ui.OpenWindow(GameUI.Window.Research);
+            yield return Shot("08b_research");
+            ui.OpenWindow(GameUI.Window.Finance);
+            yield return Shot("08c_finance");
             ui.OpenWindow(GameUI.Window.None);
 
             view.SetOverlay(Overlay.Airflow);
