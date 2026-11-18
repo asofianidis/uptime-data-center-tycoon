@@ -150,6 +150,7 @@ namespace DCT.EditorTools
         [MenuItem("Uptime/Export Catalog JSON")]
         public static void ExportCatalog()
         {
+            Catalog.EnsureLoaded();   // keep any JSON overrides in the export
             Directory.CreateDirectory("Assets/Resources/Data");
             File.WriteAllText("Assets/Resources/Data/catalog.json", Catalog.ExportJson());
             AssetDatabase.Refresh();
@@ -228,6 +229,7 @@ namespace DCT.EditorTools
                         var sim2 = new Simulation(s2);
                         sim2.TickHour();
                         sb.AppendLine($"seed {seed} {diff}: final ${s.money:N0}, min ${minMoney:N0}, level {s.Level}, unlocked {s.unlocked.Count}, completed {s.contractsCompleted}, failed {s.contractsFailed}, gameOver {s.gameOver}, save {json.Length / 1024}KB");
+                        sb.AppendLine($"    v3: pue {s.reports.LastOrDefault()?.pue:0.00} credit {s.creditScore:0} incidents {s.incidents.Count} (major {s.incidents.Count(i => i.major)}) rfps won {s.rfpsWon} lost {s.rfpsLost} fines ${s.finesTotal:N0} complaints {s.sites.Sum(x => x.complaintsTotal)} serviced {s.objects.Count(o => o.servicedHour >= 0)}/{s.objects.Count} staffSkill {(s.staff.Count > 0 ? s.staff.Average(m => m.skill) : 0):0.0} morale {(s.staff.Count > 0 ? s.staff.Average(m => m.morale) : 0):0} water ${s.reports.Sum(r => r.water):N0} anchorsOffered {s.offers.Count(o => o.anchor) + s.contracts.Count(c => c.anchor)}");
                     }
                     catch (Exception e)
                     {

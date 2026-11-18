@@ -5,7 +5,7 @@ using UnityEngine;
 
 namespace DCT
 {
-    public enum Tool { Select, Foundation, Room, Demolish, Place, Connect, Tray, Raised }
+    public enum Tool { Select, Foundation, Room, Demolish, Place, Connect, Tray, Raised, Cage }
 
     public class GameManager : MonoBehaviour
     {
@@ -177,8 +177,8 @@ namespace DCT
                 {
                     var rk = sim.Place(Catalog.Facility("rack_std"), bld.x + 1 + ri, bld.y + 8, 0);
                     if (rk == null) continue;
-                    sim.AddDevice(rk, Catalog.Device("tor_1g"));
-                    sim.FillRack(rk, Catalog.Device("srv_basic"), 12);
+                    sim.AddDevice(rk, Catalog.Device("tor_1g"), true);
+                    sim.FillRack(rk, Catalog.Device("srv_basic"), 12, true);
                     if (shaft != null) AutoManager.LayTray(sim, rk, shaft);
                     sim.Connect(rk, core0);
                 }
@@ -190,6 +190,65 @@ namespace DCT
                 yield return Shot("11g_floor2");
                 sim.SetFloor(0);
                 yield return Shot("11h_floor1_again");
+            }
+
+            // v3 systems: new equipment, finance, maintenance, tenders, spot market, portal, incidents, corporate, compliance.
+            {
+                S.money += 3_000_000;
+                foreach (var id in new[] { "evap", "heatx", "access", "liquid" }) if (!S.unlocked.Contains(id)) S.unlocked.Add(id);
+                PlacedObject PlaceAny(string id)
+                {
+                    var d = Catalog.Facility(id);
+                    for (int y = S.ownY0; y < S.ownY1; y++)
+                        for (int x = S.ownX0; x < S.ownX1; x++)
+                            if (sim.CanPlace(d, x, y, 0) == null) return sim.Place(d, x, y, 0);
+                    return null;
+                }
+                var dock = PlaceAny("dock");
+                var hx = PlaceAny("heatx");
+                PlaceAny("evap");
+                PlaceAny("access");
+                var xf = sim.ObjectsOfKind(FacilityKind.Transformer).FirstOrDefault();
+                if (xf != null)
+                    for (int dx = -1; dx <= 1; dx++)
+                        if (sim.CanPlace(Catalog.Facility("soundwall"), xf.x + dx, xf.y - 1, 0) == null) sim.Place(Catalog.Facility("soundwall"), xf.x + dx, xf.y - 1, 0);
+                var cageRack = sim.Racks.LastOrDefault(r => r.floor == 0);
+                if (cageRack != null) sim.PaintFlag(new RectInt(cageRack.x - 1, cageRack.y - 1, 3, 2), GameState.FlagCage, true, out _);
+                sim.TakeLoan(150000, 24);
+                sim.SetInsurance(2);
+                S.spotEnabled = true;
+                var orack = sim.Racks.FirstOrDefault(r => r.floor == 0 && sim.FindSlot(r, 2) >= 0);
+                if (orack != null) { sim.AddDevice(orack, Catalog.Device("srv_stor2u"), false); sim.AddDevice(orack, Catalog.Device("srv_basic"), false); }
+                foreach (var o in sim.ObjectsOfKind(FacilityKind.Cooling).Take(2)) sim.QueueMaintenance(o, false);
+                var rc = ProcGen.GenerateContract(S, new System.Random(5));
+                rc.rfp = true; rc.traits.Add("RFP");
+                S.rfps.Add(new Rfp { id = S.NewId(), contract = rc, closesHour = S.hour + 5 * 24 });
+                for (int h = 0; h < 30; h++) sim.TickHour();
+                sim.popups.Clear();
+                speed = 0;
+                if (dock != null) cam.SnapTo(new Vector3(dock.x + 1, 0, dock.y + 1), 14f);
+                else cam.SnapTo(center, 18f);
+                yield return Shot("v3_01_new_equipment");
+                if (cageRack != null) { cam.SnapTo(new Vector3(cageRack.x + 0.5f, 0, cageRack.y + 0.5f), 9f); yield return Shot("v3_02_cage"); }
+                if (hx != null) { selection.Clear(); selection.Add(hx); cam.SnapTo(new Vector3(hx.x + 1, 0, hx.y + 0.5f), 10f); yield return Shot("v3_03_heatx_inspector"); }
+                if (orack != null) { selection.Clear(); selection.Add(orack); ui.ShowTab(GameUI.Window.None, "insp", 2); yield return Shot("v3_04_rack_orders"); ui.ShowTab(GameUI.Window.None, "insp", 3); yield return Shot("v3_05_shipping"); ui.ShowTab(GameUI.Window.None, "insp", 0); }
+                selection.Clear();
+                cam.SnapTo(center, 24f);
+                ui.ShowTab(GameUI.Window.Finance, "finance", 0); yield return Shot("v3_06_finance_month");
+                ui.ShowTab(GameUI.Window.Finance, "finance", 2); yield return Shot("v3_07_loans");
+                ui.ShowTab(GameUI.Window.Finance, "finance", 3); yield return Shot("v3_08_insurance");
+                ui.ShowTab(GameUI.Window.Staff, "staff", 0); yield return Shot("v3_09_staff_team");
+                ui.ShowTab(GameUI.Window.Staff, "staff", 4); yield return Shot("v3_10_maintenance");
+                ui.ShowTab(GameUI.Window.Market, "market", 6); yield return Shot("v3_11_tenders");
+                ui.ShowTab(GameUI.Window.Market, "market", 7); yield return Shot("v3_12_spot");
+                ui.ShowTab(GameUI.Window.Contracts, "contracts", 4); yield return Shot("v3_13_portal");
+                ui.ShowTab(GameUI.Window.Log, "log", 4); yield return Shot("v3_14_incidents");
+                ui.ShowTab(GameUI.Window.Goals, "goals", 2); yield return Shot("v3_15_corporate");
+                ui.ShowTab(GameUI.Window.Sites, "sites", 2); yield return Shot("v3_16_compliance");
+                ui.ShowTab(GameUI.Window.Dashboard, "dash", 0); yield return Shot("v3_17_dashboard");
+                ui.OpenWindow(GameUI.Window.None);
+                // A post-mortem popup.
+                if (S.incidents.Count > 0) { sim.popups.Enqueue(new Popup { title = "Incident post-mortem", body = sim.PostMortemText(S.incidents[S.incidents.Count - 1]) }.Add("OK", null)); yield return Shot("v3_18_postmortem"); sim.popups.Clear(); }
             }
 
             // Second site in another city.
@@ -624,6 +683,7 @@ namespace DCT
                 case Tool.Demolish:
                 case Tool.Tray:
                 case Tool.Raised:
+                case Tool.Cage:
                 {
                     if (Input.GetMouseButtonDown(0)) { dragging = true; dragStart = tile; }
                     var rect = dragging ? Simulation.Normalize(dragStart, tile) : new RectInt(tile.x, tile.y, 1, 1);
@@ -633,9 +693,10 @@ namespace DCT
                     else if (tool == Tool.Room) { n = sim.PaintRoom(rect, roomType, false, out cost); col = Catalog.RoomColor(roomType); col.a = 0.45f; what = $"Paint {n} tile(s) as {Catalog.RoomName(roomType)}"; }
                     else if (tool == Tool.Tray) { n = sim.PaintFlag(rect, GameState.FlagTray, false, out cost); col = new Color(1f, 0.8f, 0.2f, 0.35f); what = $"Install {n} tile(s) of overhead cable tray"; }
                     else if (tool == Tool.Raised) { n = sim.PaintFlag(rect, GameState.FlagRaised, false, out cost); col = new Color(0.6f, 0.8f, 1f, 0.35f); what = $"Install {n} tile(s) of raised floor"; }
+                    else if (tool == Tool.Cage) { n = sim.PaintFlag(rect, GameState.FlagCage, false, out cost); col = new Color(0.8f, 0.5f, 1f, 0.35f); what = $"Fence {n} tile(s) into a private cage"; }
                     else { n = sim.Demolish(rect, false, out cost, out what); col = new Color(1f, 0.25f, 0.2f, 0.3f); }
                     view.ShowRect(rect, col);
-                    toolHint = n > 0 ? $"{what}   {(cost >= 0 ? "Cost" : "Refund")}: ${Mathf.Abs(cost):N0}" : (tool == Tool.Room ? "Paint over existing building foundation" : tool == Tool.Foundation ? "Drag on owned, clear land" : tool == Tool.Tray ? "Drag over building tiles to run overhead cable trays" : tool == Tool.Raised ? "Drag over Server Hall tiles" : "Nothing to demolish here");
+                    toolHint = n > 0 ? $"{what}   {(cost >= 0 ? "Cost" : "Refund")}: ${Mathf.Abs(cost):N0}" : (tool == Tool.Room ? "Paint over existing building foundation" : tool == Tool.Foundation ? "Drag on owned, clear land" : tool == Tool.Tray ? "Drag over building tiles to run overhead cable trays" : tool == Tool.Raised || tool == Tool.Cage ? "Drag over Server Hall tiles" : "Nothing to demolish here");
                     if (dragging && Input.GetMouseButtonUp(0))
                     {
                         dragging = false;
@@ -643,6 +704,7 @@ namespace DCT
                         else if (tool == Tool.Room) sim.PaintRoom(rect, roomType, true, out _);
                         else if (tool == Tool.Tray) sim.PaintFlag(rect, GameState.FlagTray, true, out _);
                         else if (tool == Tool.Raised) sim.PaintFlag(rect, GameState.FlagRaised, true, out _);
+                        else if (tool == Tool.Cage) sim.PaintFlag(rect, GameState.FlagCage, true, out _);
                         else sim.Demolish(rect, true, out _, out _);
                     }
                     break;

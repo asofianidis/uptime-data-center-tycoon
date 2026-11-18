@@ -11,6 +11,15 @@ namespace DCT
 
         int Tab(string key, int def = 0) => tabState.TryGetValue(key, out var v) ? v : def;
 
+        /// <summary>Opens a window on a given tab (used by the screenshot run and in-game links).</summary>
+        public void ShowTab(Window w, string key, int idx)
+        {
+            OpenWindow(w);
+            tabState[key] = idx;
+            windowSection?.Invalidate();
+            inspectorSection?.Invalidate();
+        }
+
         void SetTab(string key, int idx, Section sec)
         {
             if (tabState.TryGetValue(key, out var cur) && cur == idx) return;

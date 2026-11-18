@@ -25,6 +25,19 @@ namespace DCT
         public float monthSolarKWh, monthGridKWh;
         public int landPurchases;
         public int openedHour;
+
+        // ---- v3 per-site systems (accessed directly through Simulation.Site, not swapped by Bind) ----
+        public float monthITKWh, monthTotalKWh, monthWaterM3, monthHeatKWh;
+        public float lastPue;                  // energy-weighted PUE of the last full month (0 = no data)
+        public List<float> pueHistory = new List<float>();
+        public int certUntilHour = -1;         // compliance certification valid until this hour
+        public int auditEndHour = -1;          // audit in progress until this hour
+        public int lastBreachHour = -100000;   // last successful break-in (voids certification)
+        public int residentialSide = -1;       // 0 N, 1 S, 2 E, 3 W; -1 = not generated yet
+        public float noiseLevel;               // loudest level at the neighbours' fence this hour (dB)
+        public int complaints;                 // noise complaints this month
+        public int complaintsTotal;
+        public float noiseStrikes;             // escalates fines; decays when quiet
     }
 
     [Serializable]
@@ -40,6 +53,12 @@ namespace DCT
         public float carbonTax;            // $ per grid kWh
         public float solarFactor = 1f;     // sunniness
         public string blurb;
+        // ---- v3 ----
+        public bool v3;                    // false on cities from older saves: filled in from the climate on load
+        public float humidity = 0.5f;      // 0 dry .. 1 humid (evaporative cooling works best when dry)
+        public float waterPrice = 2.5f;    // $ per cubic metre
+        public float heatPrice;            // $ per kWh of recovered heat sold to district heating (winter peak)
+        public float noiseLimit = 55f;     // dB allowed at the residential boundary
     }
 
     [Serializable]
@@ -51,6 +70,10 @@ namespace DCT
         public bool failed;
         public int repairLeft;   // hours of technician work remaining
         public int ageHours;
+        public int arriveHour;   // on order: delivery hour
+        public bool arrived;     // on order: delivered to the dock, waiting to be installed
+        public bool express;     // on order: shipped express
+        public float paid;       // on order: price paid (refunded if the order is cancelled)
     }
 
     [Serializable]
@@ -71,6 +94,12 @@ namespace DCT
         public int repairLeft;
         public int placedOrder;
         public int floor;
+        public List<RackDevice> orders = new List<RackDevice>();   // hardware on order / awaiting install
+        public int servicedHour = -1;  // last preventive maintenance (-1 = since placed)
+        public bool maintQueued;       // a maintenance job is waiting for staff
+        public bool maintNow;          // requested by the player: don't wait for the night window
+        public bool inMaint;           // staff are servicing it right now (offline unless redundant)
+        public int placedHour = -1;
     }
 
     [Serializable]
@@ -122,6 +151,18 @@ namespace DCT
         public float satisfaction = 70f;
         public bool negotiated;
         public bool referral;
+        // ---- v3 ----
+        public bool compliance;         // racks must be in certified (audited) sites
+        public bool caged;              // racks must sit inside one private cage
+        public bool efficient;          // wants a monthly PUE at or below Simulation.EfficientPue
+        public bool anchor;             // hyperscale anchor tenant: dedicated hall, phased ramp-up
+        public float phase = 1f;        // anchor: current phase as a fraction of the full requirement
+        public int reqRacksFull, reqServersFull, reqCoresFull, reqGpusFull;
+        public float reqStorageFull, reqBandwidthFull;
+        public bool rfp;                // won through a competitive bid
+        public bool acquired;           // came with a rival acquisition
+        public List<float> satHistory = new List<float>();   // one sample per day
+        public List<string> satNotes = new List<string>();   // recent reasons for satisfaction changes
     }
 
     [Serializable]
@@ -142,6 +183,13 @@ namespace DCT
         public float work;
         public List<int> path = new List<int>();
         public int hiredHour;
+        // ---- v3: growth ----
+        public float xp;
+        public float morale = 75f;
+        public int trainingUntil = -1;  // away on a course until this hour
+        public bool raiseRequested;
+        public int jobsDone;
+        public int lastRaiseHour;
     }
 
     [Serializable]
@@ -172,6 +220,7 @@ namespace DCT
     {
         public int day;
         public float money, revenue, cost, loadKW, solarKW, uptime, temp;
+        public float pue, sales, share;
     }
 
     [Serializable]
@@ -206,15 +255,60 @@ namespace DCT
     {
         public int month;
         public float income, bonuses, penalties, power, network, salaries, capex, other;
-        public float Net => income + bonuses - penalties - power - network - salaries - capex - other;
+        // ---- v3 ----
+        public float sales;          // spot compute and district-heat sales
+        public float claims;         // insurance payouts
+        public float interest, insurance, water, fines;
+        public float borrowed, repaid;   // loan principal in / out (financing, not operating)
+        public float pue;
         /// <summary>Profit from running the business, before construction and hardware purchases (investment).</summary>
-        public float Operating => income + bonuses - penalties - power - network - salaries - other;
+        public float Operating => income + bonuses + sales + claims - penalties - power - network - salaries - other - interest - insurance - water - fines;
+        /// <summary>Change in cash: operating profit minus investment, plus loan money in, minus principal repaid.</summary>
+        public float Net => Operating - capex + borrowed - repaid;
+    }
+
+    [Serializable]
+    public class Loan
+    {
+        public int id;
+        public string lender;
+        public float principal, balance;
+        public float rate;          // annual interest rate
+        public int months, monthsLeft;
+        public float payment;       // fixed monthly payment (term loans)
+        public int nextHour;
+        public bool creditLine;     // revolving: interest only, repay any time
+    }
+
+    [Serializable]
+    public class Rfp
+    {
+        public int id;
+        public Contract contract;   // the deal on offer (monthlyPay = the customer's budget)
+        public int closesHour;
+        public float bidMul = -1f;  // your bid as a fraction of the budget; -1 = no bid
+        public string rivalWinner;
+        public float bestRivalMul;
+    }
+
+    [Serializable]
+    public class Incident
+    {
+        public int id;
+        public int site;
+        public int startHour, endHour = -1;
+        public float customerHours;         // summed contract downtime
+        public List<string> causes = new List<string>();
+        public List<string> events = new List<string>();
+        public List<string> customers = new List<string>();
+        public List<string> fixes = new List<string>();
+        public bool major;
     }
 
     [Serializable]
     public class GameState
     {
-        public int version = 2;
+        public int version = 3;
         public int seed;
         public string difficulty = "Normal";
         public float money;
@@ -273,12 +367,40 @@ namespace DCT
         public bool tutorial;
         public int tutorialStep;
 
+        // ---- v3: finance, operations, business ----
+        public List<Loan> loans = new List<Loan>();
+        public int missedPayments, loansRepaid;
+        public float creditScore = 650f;
+        public int insuranceTier;                  // 0 none, 1 basic, 2 comprehensive
+        public int claimsMade;
+        public float claimsPaidTotal, claimsRecent;
+        public bool shipExpress;
+        public bool spotEnabled;
+        public float spotCoreMul = 1f, spotGpuMul = 1f, spotEarnedTotal, heatSoldTotal;
+        public bool autoMaintenance = true;
+        public int maintIntervalDays = 120;
+        public bool maintNightOnly = true;
+        public int lastComplaintHour = -1;
+        public List<Rfp> rfps = new List<Rfp>();
+        public int rfpsWon, rfpsLost;
+        public List<Incident> incidents = new List<Incident>();
+        public bool incidentOpen;
+        public bool postMortemPopups = true;
+        public int rivalsAcquired;
+        public float sharePrice, ipoSharePrice, shares, boardConfidence = 70f;
+        public int quarterEndHour, quartersMet, quartersMissed;
+        public float quarterStartMrr, quarterTarget;
+        public float finesTotal;
+        public int trainingsDone;
+        public bool scenarioSetup;
+        public float scenarioBaseline;
+
         // ---- sandbox (creative) mode ----
         public bool creative;
         public bool cheatInfiniteMoney, cheatNoFailures, cheatNoEvents, cheatNoBankruptcy;
         [NonSerialized] public int bound = -1;
 
-        public const int FlagTray = 1, FlagRaised = 2;
+        public const int FlagTray = 1, FlagRaised = 2, FlagCage = 4;
         public const int MaxFloors = 4;
         public const float FloorHeight = 3.2f;
 

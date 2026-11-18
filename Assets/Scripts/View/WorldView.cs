@@ -12,8 +12,8 @@ namespace DCT
         public int highlightContract = -1;
 
         Material litMat, transMat, unlitMat;
-        GameObject groundGO, wallsGO, sceneryGO, gridGO, traysGO, hintGO, massGO;
-        Mesh groundMesh, wallsMesh, sceneryMesh, gridMesh, traysMesh, hintMesh, massMesh;
+        GameObject groundGO, wallsGO, sceneryGO, gridGO, traysGO, hintGO, massGO, cagesGO;
+        Mesh groundMesh, wallsMesh, sceneryMesh, gridMesh, traysMesh, hintMesh, massMesh, cagesMesh;
         Transform floorRoot;
         public float FloorY => sim != null ? sim.S.floor * GameState.FloorHeight : 0f;
         Material hintMat;
@@ -60,6 +60,8 @@ namespace DCT
             gridGO.transform.SetParent(floorRoot, false);
             traysGO = MakeGO("Trays", litMat, out traysMesh);
             traysGO.transform.SetParent(floorRoot, false);
+            cagesGO = MakeGO("Cages", litMat, out cagesMesh);
+            cagesGO.transform.SetParent(floorRoot, false);
             hintGO = MakeGO("Hint", transMat, out hintMesh);
             hintGO.transform.SetParent(floorRoot, false);
             hintMat = hintGO.GetComponent<MeshRenderer>().material;
@@ -91,6 +93,8 @@ namespace DCT
             staffViews.Clear();
             foreach (var g in overlayMarkers.Values) if (g != null) Destroy(g);
             overlayMarkers.Clear();
+            foreach (var t in trucks) if (t.go != null) Destroy(t.go);
+            trucks.Clear();
             builtTilesVersion = -1; builtObjectsVersion = -1;
             Rebuild();
         }
@@ -131,6 +135,7 @@ namespace DCT
             UpdateOverlayMarkers();
             UpdateStaff();
             UpdateEnvironment();
+            UpdateTrucks();
             gridGO.SetActive(showGrid);
             traysGO.SetActive(showCables || (gm != null && gm.tool == Tool.Tray));
             if (hintGO.activeSelf) hintMat.color = new Color(1f, 0.85f, 0.2f, 0.25f + 0.25f * Mathf.PingPong(Time.unscaledTime * 2f, 1f));
@@ -258,6 +263,44 @@ namespace DCT
             mb.ToMesh(wallsMesh);
             BuildMass();
             BuildTrays();
+            BuildCages();
+        }
+
+        /// <summary>Mesh fences around each private cage on the viewed floor.</summary>
+        void BuildCages()
+        {
+            var S = sim.S;
+            var mb = new MeshBuilder();
+            Color mesh = new Color(0.35f, 0.36f, 0.4f), post = new Color(0.55f, 0.4f, 0.75f);
+            const float H = 1.9f;
+            bool Cage(int x, int y) => S.HasFlag(x, y, GameState.FlagCage);
+            void Fence(Vector3 a, Vector3 b)
+            {
+                var mid = (a + b) * 0.5f;
+                bool alongX = Mathf.Abs(b.x - a.x) > 0.01f;
+                var size = alongX ? new Vector3(1f, 0.03f, 0.03f) : new Vector3(0.03f, 0.03f, 1f);
+                mb.Box(mid + new Vector3(0, H, 0), size, post);
+                mb.Box(mid + new Vector3(0, 0.05f, 0), size, post);
+                // Vertical mesh bars
+                for (int i = 0; i < 5; i++)
+                {
+                    float t = (i + 0.5f) / 5f;
+                    var p = Vector3.Lerp(a, b, t);
+                    mb.Box(p + new Vector3(0, H * 0.5f, 0), new Vector3(0.015f, H, 0.015f), mesh);
+                }
+                mb.Box(a + new Vector3(0, H * 0.5f, 0), new Vector3(0.05f, H, 0.05f), post);
+            }
+            if (S.flags != null)
+                for (int y = 0; y < S.mapH; y++)
+                    for (int x = 0; x < S.mapW; x++)
+                    {
+                        if (!Cage(x, y)) continue;
+                        if (!Cage(x, y - 1)) Fence(new Vector3(x, 0, y + 0.03f), new Vector3(x + 1, 0, y + 0.03f));
+                        if (!Cage(x, y + 1)) Fence(new Vector3(x, 0, y + 0.97f), new Vector3(x + 1, 0, y + 0.97f));
+                        if (!Cage(x - 1, y)) Fence(new Vector3(x + 0.03f, 0, y), new Vector3(x + 0.03f, 0, y + 1));
+                        if (!Cage(x + 1, y)) Fence(new Vector3(x + 0.97f, 0, y), new Vector3(x + 0.97f, 0, y + 1));
+                    }
+            mb.ToMesh(cagesMesh);
         }
 
         /// <summary>Floors below the viewed one, drawn as solid storeys with windows.</summary>
@@ -331,6 +374,19 @@ namespace DCT
             }
             // Access road leading to the lot
             mb.FlatQuad(S.ownX0 - 0.0f, -60, S.ownX0 + 2.5f, S.ownY0, 0.01f, new Color(0.25f, 0.25f, 0.27f));
+            // Neighbours: a row of houses beyond the lot on the residential side (noise-sensitive).
+            int side = sim.ResidentialSide;
+            var hr = new System.Random(S.seed * 13 + S.activeSite);
+            bool horizontal = side < 2;
+            float off = 4.5f;
+            int from = horizontal ? S.ownX0 - 4 : S.ownY0 - 4, to = horizontal ? S.ownX1 + 4 : S.ownY1 + 4;
+            for (int t = from; t < to; t += 3)
+            {
+                Vector3 hp = side == 0 ? new Vector3(t + 1.5f, 0, S.ownY1 + off) : side == 1 ? new Vector3(t + 1.5f, 0, S.ownY0 - off)
+                           : side == 2 ? new Vector3(S.ownX1 + off, 0, t + 1.5f) : new Vector3(S.ownX0 - off, 0, t + 1.5f);
+                if (side == 1 && hp.x >= S.ownX0 - 1.5f && hp.x <= S.ownX0 + 4f) continue;   // keep the access road clear
+                Models.House(mb, hp, hr);
+            }
             mb.ToMesh(sceneryMesh);
         }
 
@@ -571,9 +627,11 @@ namespace DCT
                     else if (info.failedDevices > 0 || info.servers > info.ports) c = new Color(1f, 0.65f, 0.1f);
                     else if (o.contractId < 0) c = new Color(0.3f, 0.6f, 1f);
                     else c = new Color(0.2f, 1f, 0.3f);
+                    if (o.inMaint) { c = new Color(0.3f, 0.6f, 1f); flash = true; }
                     if (highlightContract > 0 && o.contractId == highlightContract) { c = Color.white; flash = true; }
                 }
                 else if (o.failed || o.pduTripped) { c = new Color(1f, 0.15f, 0.1f); flash = true; }
+                else if (o.inMaint) { c = new Color(0.3f, 0.6f, 1f); flash = true; }
                 else c = new Color(0.2f, 1f, 0.3f);
                 float k = flash ? blink : 1f;
                 v.ledMat.color = c * 0.4f;

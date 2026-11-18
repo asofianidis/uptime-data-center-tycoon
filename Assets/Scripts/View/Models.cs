@@ -43,6 +43,10 @@ namespace DCT
                 case FacilityKind.Suppression: return Suppression(mb, d);
                 case FacilityKind.Battery: return Battery(mb, d);
                 case FacilityKind.Elevator: return Elevator(mb, d);
+                case FacilityKind.HeatExchanger: return HeatExchanger(mb, d);
+                case FacilityKind.AccessControl: return AccessControl(mb, d);
+                case FacilityKind.LoadingDock: return LoadingDock(mb, d);
+                case FacilityKind.SoundWall: return SoundWall(mb, d);
             }
             mb.Box(new Vector3(0, 0.5f, 0), new Vector3(0.8f, 1f, 0.8f), d.color);
             return 1f;
@@ -121,6 +125,25 @@ namespace DCT
 
         static float Cooling(MeshBuilder mb, FacilityDef d)
         {
+            if (d.water > 0)
+            {
+                // Evaporative cooler: wetted media panels on the sides, a big fan on top.
+                float EH = 1.7f;
+                mb.Box(new Vector3(0, 0.08f, 0), new Vector3(0.92f, 0.16f, 0.88f), new Color(0.3f, 0.32f, 0.35f));
+                mb.Box(new Vector3(0, EH * 0.5f + 0.08f, 0), new Vector3(0.86f, EH, 0.82f), d.color);
+                Color media = new Color(0.35f, 0.62f, 0.6f);
+                for (int i = 0; i < 5; i++)
+                {
+                    mb.Box(new Vector3(0, 0.35f + i * 0.26f, -0.42f), new Vector3(0.74f, 0.2f, 0.02f), media);
+                    mb.Box(new Vector3(-0.44f, 0.35f + i * 0.26f, 0), new Vector3(0.02f, 0.2f, 0.7f), media);
+                    mb.Box(new Vector3(0.44f, 0.35f + i * 0.26f, 0), new Vector3(0.02f, 0.2f, 0.7f), media);
+                }
+                mb.Prism(new Vector3(0, EH + 0.08f, 0), 0.34f, 0.34f, 0.05f, 12, new Color(0.15f, 0.16f, 0.18f));
+                mb.Box(new Vector3(0, EH + 0.15f, 0), new Vector3(0.6f, 0.01f, 0.06f), new Color(0.6f, 0.6f, 0.65f));
+                mb.Box(new Vector3(0, EH + 0.15f, 0), new Vector3(0.06f, 0.01f, 0.6f), new Color(0.6f, 0.6f, 0.65f));
+                mb.Box(new Vector3(0.3f, 0.2f, -0.46f), new Vector3(0.12f, 0.05f, 0.03f), MeshBuilder.Led(new Color(0.3f, 0.7f, 1f)));
+                return EH + 0.2f;
+            }
             if (d.w > 1)
             {
                 // Liquid CDU
@@ -330,6 +353,94 @@ namespace DCT
             }
             mb.Box(new Vector3(L * 0.3f, 1.62f, 0), new Vector3(0.3f, 0.06f, 0.3f), new Color(0.3f, 0.3f, 0.32f));
             return 1.7f;
+        }
+
+        static float HeatExchanger(MeshBuilder mb, FacilityDef d)
+        {
+            float L = d.w * 0.92f;
+            mb.Box(new Vector3(0, 0.06f, 0), new Vector3(L, 0.12f, 0.85f), new Color(0.45f, 0.45f, 0.45f));
+            // Plate heat exchanger frame
+            mb.Box(new Vector3(-0.35f, 0.75f, 0), new Vector3(0.7f, 1.2f, 0.5f), new Color(0.75f, 0.76f, 0.78f));
+            for (int i = 0; i < 9; i++) mb.Box(new Vector3(-0.66f + i * 0.08f, 0.75f, -0.26f), new Vector3(0.03f, 1.05f, 0.02f), new Color(0.55f, 0.56f, 0.6f));
+            // Hot (red) and return (blue) pipes with a pump
+            mb.Prism(new Vector3(0.35f, 0.12f, -0.18f), 0.12f, 0.12f, 1.1f, 10, new Color(0.85f, 0.3f, 0.2f));
+            mb.Prism(new Vector3(0.35f, 0.12f, 0.18f), 0.12f, 0.12f, 1.1f, 10, new Color(0.25f, 0.45f, 0.9f));
+            mb.Box(new Vector3(0.0f, 1.12f, -0.18f), new Vector3(0.7f, 0.1f, 0.1f), new Color(0.85f, 0.3f, 0.2f));
+            mb.Box(new Vector3(0.0f, 1.0f, 0.18f), new Vector3(0.7f, 0.1f, 0.1f), new Color(0.25f, 0.45f, 0.9f));
+            mb.Box(new Vector3(0.7f, 0.35f, 0), new Vector3(0.24f, 0.3f, 0.5f), new Color(0.2f, 0.35f, 0.25f));
+            mb.Box(new Vector3(0.7f, 0.55f, -0.26f), new Vector3(0.06f, 0.06f, 0.01f), MeshBuilder.Led(new Color(1f, 0.5f, 0.2f)));
+            mb.Box(new Vector3(0.82f, 0.06f, -0.18f), new Vector3(0.15f, 0.12f, 0.12f), new Color(0.85f, 0.3f, 0.2f));
+            mb.Box(new Vector3(0.82f, 0.06f, 0.18f), new Vector3(0.15f, 0.12f, 0.12f), new Color(0.25f, 0.45f, 0.9f));
+            return 1.4f;
+        }
+
+        static float AccessControl(MeshBuilder mb, FacilityDef d)
+        {
+            Color steel = new Color(0.7f, 0.72f, 0.75f), glass = new Color(0.55f, 0.75f, 0.85f);
+            foreach (var x in new[] { -0.36f, 0.36f })
+            {
+                mb.Box(new Vector3(x, 0.5f, 0), new Vector3(0.16f, 1.0f, 0.75f), steel);
+                mb.Box(new Vector3(x, 1.01f, -0.25f), new Vector3(0.1f, 0.02f, 0.12f), MeshBuilder.Led(new Color(0.2f, 1f, 0.4f)));
+            }
+            mb.Box(new Vector3(-0.18f, 0.7f, 0), new Vector3(0.2f, 0.5f, 0.02f), glass);
+            mb.Box(new Vector3(0.18f, 0.7f, 0), new Vector3(0.2f, 0.5f, 0.02f), glass);
+            mb.Box(new Vector3(0.42f, 1.3f, 0.36f), new Vector3(0.05f, 2.6f, 0.05f), new Color(0.3f, 0.32f, 0.35f));
+            mb.Box(new Vector3(0.36f, 2.55f, 0.3f), new Vector3(0.12f, 0.1f, 0.22f), new Color(0.9f, 0.9f, 0.9f));
+            mb.Box(new Vector3(0.36f, 2.55f, 0.18f), new Vector3(0.05f, 0.05f, 0.01f), MeshBuilder.Led(new Color(1f, 0.15f, 0.1f)));
+            return 1.2f;
+        }
+
+        static float LoadingDock(MeshBuilder mb, FacilityDef d)
+        {
+            float W = d.w * 0.96f, D = d.h * 0.96f;
+            Color concrete = new Color(0.62f, 0.62f, 0.6f);
+            mb.Box(new Vector3(0, 0.3f, D * 0.25f), new Vector3(W, 0.6f, D * 0.5f), concrete);
+            mb.FlatQuad(-W * 0.5f, -D * 0.5f, W * 0.5f, 0, 0.012f, new Color(0.32f, 0.32f, 0.34f));
+            for (int i = 0; i < 4; i++) mb.Box(new Vector3(-W * 0.4f + i * W * 0.27f, 0.62f, -0.02f), new Vector3(W * 0.12f, 0.02f, 0.06f), new Color(0.95f, 0.8f, 0.1f));
+            mb.Box(new Vector3(-0.45f, 0.35f, -0.03f), new Vector3(0.14f, 0.3f, 0.08f), new Color(0.08f, 0.08f, 0.08f));
+            mb.Box(new Vector3(0.45f, 0.35f, -0.03f), new Vector3(0.14f, 0.3f, 0.08f), new Color(0.08f, 0.08f, 0.08f));
+            mb.Box(new Vector3(0, 0.61f, 0.15f), new Vector3(0.8f, 0.02f, 0.3f), new Color(0.45f, 0.47f, 0.5f));
+            mb.Box(new Vector3(0, 1.45f, D * 0.47f), new Vector3(1.2f, 1.7f, 0.06f), new Color(0.5f, 0.55f, 0.6f));
+            for (int i = 0; i < 8; i++) mb.Box(new Vector3(0, 0.7f + i * 0.2f, D * 0.44f), new Vector3(1.1f, 0.02f, 0.01f), new Color(0.4f, 0.45f, 0.5f));
+            mb.Box(new Vector3(0, 2.35f, D * 0.3f), new Vector3(1.5f, 0.06f, 0.5f), new Color(0.35f, 0.38f, 0.42f));
+            mb.Box(new Vector3(0.7f, 1.4f, D * 0.44f), new Vector3(0.05f, 0.05f, 0.01f), MeshBuilder.Led(new Color(0.2f, 1f, 0.3f)));
+            return 2.4f;
+        }
+
+        static float SoundWall(MeshBuilder mb, FacilityDef d)
+        {
+            Color panel = d.color;
+            mb.Box(new Vector3(0, 1.2f, 0), new Vector3(0.98f, 2.4f, 0.12f), panel);
+            for (int i = 0; i < 6; i++) mb.Box(new Vector3(0, 0.2f + i * 0.4f, -0.065f), new Vector3(0.9f, 0.03f, 0.01f), MeshBuilder.Shade(panel, 0.8f));
+            mb.Box(new Vector3(-0.47f, 1.25f, 0), new Vector3(0.06f, 2.5f, 0.16f), new Color(0.4f, 0.4f, 0.42f));
+            mb.Box(new Vector3(0.47f, 1.25f, 0), new Vector3(0.06f, 2.5f, 0.16f), new Color(0.4f, 0.4f, 0.42f));
+            return 2.5f;
+        }
+
+        /// <summary>Delivery truck, facing +Z.</summary>
+        public static void Truck(MeshBuilder mb, Color body)
+        {
+            mb.Box(new Vector3(0, 0.75f, -0.4f), new Vector3(0.9f, 1.1f, 2.2f), new Color(0.92f, 0.92f, 0.9f));
+            mb.Box(new Vector3(0, 0.6f, 1.15f), new Vector3(0.9f, 0.9f, 0.7f), body);
+            mb.Box(new Vector3(0, 0.82f, 1.51f), new Vector3(0.8f, 0.35f, 0.02f), new Color(0.3f, 0.45f, 0.55f));
+            foreach (var z in new[] { -1.1f, -0.2f, 1.15f })
+                foreach (var x in new[] { -0.42f, 0.42f })
+                    mb.Box(new Vector3(x, 0.17f, z), new Vector3(0.12f, 0.34f, 0.34f), new Color(0.1f, 0.1f, 0.1f));
+            mb.Box(new Vector3(0.3f, 0.45f, 1.51f), new Vector3(0.12f, 0.06f, 0.01f), MeshBuilder.Led(new Color(1f, 0.95f, 0.7f)));
+            mb.Box(new Vector3(-0.3f, 0.45f, 1.51f), new Vector3(0.12f, 0.06f, 0.01f), MeshBuilder.Led(new Color(1f, 0.95f, 0.7f)));
+        }
+
+        /// <summary>A neighbour's house (noise-sensitive residents next to the lot).</summary>
+        public static void House(MeshBuilder mb, Vector3 p, System.Random r)
+        {
+            Color[] walls = { new Color(0.85f, 0.8f, 0.7f), new Color(0.75f, 0.82f, 0.85f), new Color(0.88f, 0.75f, 0.65f), new Color(0.8f, 0.8f, 0.78f) };
+            Color wall = walls[r.Next(walls.Length)];
+            Color roof = r.NextDouble() < 0.5 ? new Color(0.55f, 0.25f, 0.2f) : new Color(0.3f, 0.32f, 0.36f);
+            float w = 1.6f + (float)r.NextDouble() * 0.6f, h = 1.0f + (float)r.NextDouble() * 0.4f;
+            mb.Box(p + new Vector3(0, h * 0.5f, 0), new Vector3(w, h, w * 0.85f), wall);
+            mb.Prism(p + new Vector3(0, h, 0), w * 0.78f, 0.02f, 0.7f, 4, roof);
+            mb.Box(p + new Vector3(0, 0.35f, -w * 0.43f), new Vector3(0.3f, 0.7f, 0.02f), new Color(0.4f, 0.28f, 0.2f));
+            mb.Box(p + new Vector3(w * 0.25f, h * 0.6f, -w * 0.43f), new Vector3(0.3f, 0.3f, 0.02f), MeshBuilder.Led(new Color(1f, 0.85f, 0.5f)));
         }
 
         public static void Person(MeshBuilder mb, Color shirt)

@@ -706,6 +706,100 @@ def make_rock(name, variant):
         blob(0.04, 0.17, 0.04, 0.1, 0.09, 0.07, stone2, jitter=0.25, seed=15)
     export(name)
 
+def make_evap():
+    """Evaporative cooler, 1x1 tile: wetted media on three sides, a big fan on top."""
+    reset(); p = P()
+    body = mat("EvapBody", (0.55, 0.8, 0.85), rough=0.45)
+    media = mat("EvapMedia", (0.3, 0.55, 0.5), rough=0.95)
+    water = mat("WaterBlue", (0.2, 0.5, 0.9), emit=1.5)
+    box(0, 0, 0.08, 0.92, 0.88, 0.16, p["grille"])
+    box(0, 0, 0.94, 0.86, 0.82, 1.56, body, bevel=0.02)
+    for i in range(5):
+        z = 0.35 + i * 0.27
+        box(0, -0.415, z, 0.74, 0.02, 0.21, media)
+        box(-0.435, 0, z, 0.02, 0.7, 0.21, media)
+        box(0.435, 0, z, 0.02, 0.7, 0.21, media)
+    box(0, 0, 1.74, 0.8, 0.78, 0.04, body)
+    cyl(0, 0, 1.79, 0.34, 0.06, p["grille"], verts=28, bevel=0.005)
+    cyl(0, 0, 1.83, 0.06, 0.04, p["steel"], verts=12)
+    for a in range(4):
+        box(0, 0, 1.83, 0.56, 0.07, 0.012, p["steel"], rot=(0, 0, a * math.pi / 4))
+    # Water feed pipe and level indicator
+    rod((0.3, 0.42, 0.05), (0.3, 0.42, 1.5), 0.03, mat("Pipe", (0.7, 0.72, 0.75), rough=0.3, metal=0.7))
+    box(0.3, -0.43, 0.22, 0.12, 0.012, 0.05, water)
+    export("evap")
+
+def make_heatx():
+    """District heat exchanger skid, 2x1 tiles: plate exchanger, hot/return loops, pump."""
+    reset(); p = P()
+    frame = mat("PlateFrame", (0.75, 0.76, 0.78), rough=0.35, metal=0.5)
+    plates = mat("Plates", (0.55, 0.56, 0.6), rough=0.4, metal=0.6)
+    hot = mat("PipeHot", (0.85, 0.3, 0.2), rough=0.4)
+    cold = mat("PipeCold", (0.25, 0.45, 0.9), rough=0.4)
+    pump = mat("PumpGreen", (0.2, 0.35, 0.25), rough=0.5)
+    box(0, 0, 0.06, 1.84, 0.85, 0.12, mat("Concrete", (0.5, 0.5, 0.5), rough=0.9))
+    box(-0.35, 0, 0.75, 0.7, 0.5, 1.2, frame, bevel=0.02)
+    for i in range(9):
+        box(-0.66 + i * 0.08, -0.26, 0.75, 0.03, 0.02, 1.05, plates)
+    cyl(0.35, -0.18, 0.67, 0.12, 1.1, hot, verts=16)
+    cyl(0.35, 0.18, 0.67, 0.12, 1.1, cold, verts=16)
+    rod((0.35, -0.18, 1.12), (-0.05, -0.18, 1.12), 0.05, hot)
+    rod((0.35, 0.18, 1.0), (-0.05, 0.18, 1.0), 0.05, cold)
+    box(0.7, 0, 0.35, 0.24, 0.5, 0.3, pump, bevel=0.02)
+    cyl(0.7, 0, 0.55, 0.1, 0.1, p["steel"], verts=12)
+    box(0.7, -0.26, 0.55, 0.06, 0.01, 0.06, p["amber"])
+    for y, m in ((-0.18, hot), (0.18, cold)):
+        rod((0.6, y, 0.12), (0.9, y, 0.12), 0.06, m)
+        rod((0.9, y, 0.12), (0.9, y, -0.1), 0.06, m)
+    export("heatx")
+
+def make_access():
+    """Access control: two speed-gate pedestals with glass flaps and a CCTV pole, 1x1 tile."""
+    reset(); p = P()
+    glass = mat("GateGlass", (0.5, 0.7, 0.8), rough=0.05, metal=0.3)
+    for x in (-0.36, 0.36):
+        box(x, 0, 0.5, 0.16, 0.75, 1.0, p["steel"], bevel=0.02)
+        box(x, -0.25, 1.01, 0.1, 0.12, 0.02, p["green"])
+        box(x, 0.2, 1.01, 0.08, 0.08, 0.02, p["dark"])
+    box(-0.18, 0, 0.7, 0.2, 0.02, 0.5, glass)
+    box(0.18, 0, 0.7, 0.2, 0.02, 0.5, glass)
+    box(0.42, 0.36, 1.3, 0.05, 0.05, 2.6, mat("PoleGray", (0.3, 0.32, 0.35), rough=0.5))
+    box(0.36, 0.3, 2.55, 0.12, 0.22, 0.1, p["white"], bevel=0.01)
+    box(0.36, 0.18, 2.55, 0.05, 0.01, 0.05, p["red"])
+    export("access")
+
+def make_dock():
+    """Loading dock, 2x2 tiles: raised platform against the building (+Y), apron at the front."""
+    reset(); p = P()
+    concrete = mat("Concrete", (0.62, 0.62, 0.6), rough=0.9)
+    asphalt = mat("Asphalt", (0.3, 0.3, 0.32), rough=0.95)
+    door = mat("RollerDoor", (0.5, 0.55, 0.6), rough=0.5, metal=0.4)
+    box(0, 0.48, 0.3, 1.92, 0.96, 0.6, concrete, bevel=0.01)
+    box(0, -0.48, 0.006, 1.92, 0.96, 0.012, asphalt)
+    for i in range(4):
+        box(-0.77 + i * 0.52, -0.02, 0.61, 0.24, 0.06, 0.02, p["yellow"])
+    for x in (-0.45, 0.45):
+        box(x, -0.03, 0.35, 0.14, 0.08, 0.3, p["rubber"], bevel=0.01)
+    box(0, 0.15, 0.61, 0.8, 0.3, 0.02, p["steel"])
+    box(0, 0.9, 1.45, 1.2, 0.06, 1.7, door)
+    for i in range(8):
+        box(0, 0.86, 0.7 + i * 0.2, 1.1, 0.01, 0.02, p["grille"])
+    box(0, 0.6, 2.35, 1.5, 0.5, 0.06, p["grille"])
+    box(0.7, 0.86, 1.4, 0.05, 0.01, 0.05, p["green"])
+    export("dock")
+
+def make_soundwall():
+    """Acoustic barrier panel between two posts, 1x1 tile."""
+    reset(); p = P()
+    panel = mat("BarrierPanel", (0.45, 0.5, 0.42), rough=0.9)
+    rib = mat("BarrierRib", (0.36, 0.4, 0.34), rough=0.9)
+    box(0, 0, 1.2, 0.98, 0.12, 2.4, panel)
+    for i in range(6):
+        box(0, -0.065, 0.2 + i * 0.4, 0.9, 0.01, 0.03, rib)
+    for x in (-0.47, 0.47):
+        box(x, 0, 1.25, 0.06, 0.16, 2.5, p["steel"])
+    export("soundwall")
+
 BUILDS = [
     ("crac", lambda: make_crac("crac", 1.8, (0.85, 0.87, 0.88))),
     ("inrow", lambda: make_crac("inrow", 2.0, (0.75, 0.85, 0.95))),
@@ -715,6 +809,7 @@ BUILDS = [
     ("liquid", make_liquid), ("xfmr_big", make_xfmr_big), ("swgear_big", make_swgear_big),
     ("gen_big", make_gen_big), ("solar_big", make_solar_big), ("bess", make_bess),
     ("elevator", make_elevator), ("ups_li", make_ups_li),
+    ("evap", make_evap), ("heatx", make_heatx), ("access", make_access), ("dock", make_dock), ("soundwall", make_soundwall),
     ("rack_std", lambda: make_rack("rack_std", 42, "std")),
     ("rack_hd", lambda: make_rack("rack_hd", 48, "hd")),
     ("rack_ai", lambda: make_rack("rack_ai", 52, "ai")),

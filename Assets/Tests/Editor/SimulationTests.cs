@@ -10,6 +10,7 @@ namespace DCT.Tests
         {
             var s = Simulation.NewGame(seed, "Normal", scenario);
             var sim = new Simulation(s);
+            sim.S.shipExpress = true;   // tests install hardware instantly unless they test deliveries
             AutoManager.BuildStarter(sim);
             return sim;
         }

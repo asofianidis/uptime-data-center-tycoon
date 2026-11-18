@@ -5,7 +5,7 @@ namespace DCT
 {
     public enum RoomType { None = 0, Corridor = 1, ServerHall = 2, Network = 3, Power = 4, Office = 5, Outdoor = 99 }
     public enum DeviceKind { Server, Switch }
-    public enum FacilityKind { Rack, Cooling, CoreSwitch, Isp, Transformer, Switchgear, Ups, Generator, Desk, Solar, Suppression, Battery, Elevator }
+    public enum FacilityKind { Rack, Cooling, CoreSwitch, Isp, Transformer, Switchgear, Ups, Generator, Desk, Solar, Suppression, Battery, Elevator, HeatExchanger, AccessControl, LoadingDock, SoundWall }
 
     /// <summary>Rack-mountable equipment (servers and top-of-rack switches).</summary>
     [System.Serializable]
@@ -48,6 +48,9 @@ namespace DCT
         public int staff;
         public string model;       // optional Resources/Models prefab (Blender asset)
         public float capacityKWh;  // battery storage
+        public float water;        // evaporative cooling: cubic metres of water per hour at full load
+        public float heatKW;       // heat exchanger: recovered heat it can export
+        public float noise;        // outdoor noise at 1 tile (dB); generators only while running
         public int level = 1;
         public float research;
         public Color color = Color.gray;
@@ -138,9 +141,9 @@ namespace DCT
                 desc = "Private dark fiber with 400 Gbps.", color = new Color(1f, 0.8f, 0.3f) },
 
             // ---- Power ----
-            new FacilityDef { id = "xfmr", model = "xfmr", name = "Utility Transformer", kind = FacilityKind.Transformer, room = RoomType.Outdoor, cost = 15000, supplyKW = 150, level = 1,
+            new FacilityDef { id = "xfmr", model = "xfmr", name = "Utility Transformer", kind = FacilityKind.Transformer, room = RoomType.Outdoor, cost = 15000, supplyKW = 150, noise = 52, level = 1,
                 desc = "Outdoor grid connection, 150 kW. Must sit on owned land outside the building.", color = new Color(0.45f, 0.55f, 0.45f) },
-            new FacilityDef { id = "xfmr_big", name = "Substation Feed", kind = FacilityKind.Transformer, room = RoomType.Outdoor, w = 2, h = 2, cost = 90000, supplyKW = 1200, level = 5, research = 90000,
+            new FacilityDef { id = "xfmr_big", name = "Substation Feed", kind = FacilityKind.Transformer, room = RoomType.Outdoor, w = 2, h = 2, cost = 90000, supplyKW = 1200, noise = 60, level = 5, research = 90000,
                 desc = "Dedicated substation, 1.2 MW.", color = new Color(0.4f, 0.5f, 0.4f) },
             new FacilityDef { id = "swgear", model = "swgear", name = "Switchgear Panel", kind = FacilityKind.Switchgear, room = RoomType.Power, cost = 7500, supplyKW = 250, level = 1,
                 desc = "Distributes up to 250 kW to the building. Usable supply is the lower of transformer and switchgear capacity.", color = new Color(0.6f, 0.6f, 0.62f) },
@@ -150,9 +153,9 @@ namespace DCT
                 desc = "Rides through short grid outages for up to 100 kW of load. Needed for generators to take over.", color = new Color(0.2f, 0.22f, 0.25f) },
             new FacilityDef { id = "ups_li", model = "ups_li", name = "Li-ion UPS", kind = FacilityKind.Ups, room = RoomType.Power, cost = 45000, backupKW = 500, level = 4, research = 60000,
                 desc = "500 kW lithium-ion UPS.", color = new Color(0.15f, 0.25f, 0.3f) },
-            new FacilityDef { id = "gen", model = "gen", name = "Diesel Generator", kind = FacilityKind.Generator, room = RoomType.Outdoor, w = 2, h = 1, cost = 34000, backupKW = 300, level = 2, research = 10000,
+            new FacilityDef { id = "gen", model = "gen", name = "Diesel Generator", kind = FacilityKind.Generator, room = RoomType.Outdoor, w = 2, h = 1, cost = 34000, backupKW = 300, noise = 82, level = 2, research = 10000,
                 desc = "Outdoor backup generator, 300 kW. Covers long outages together with UPS.", color = new Color(0.9f, 0.75f, 0.15f) },
-            new FacilityDef { id = "gen_big", name = "Turbine Generator", kind = FacilityKind.Generator, room = RoomType.Outdoor, w = 2, h = 2, cost = 150000, backupKW = 1500, level = 6, research = 150000,
+            new FacilityDef { id = "gen_big", name = "Turbine Generator", kind = FacilityKind.Generator, room = RoomType.Outdoor, w = 2, h = 2, cost = 150000, backupKW = 1500, noise = 88, level = 6, research = 150000,
                 desc = "1.5 MW gas turbine.", color = new Color(0.85f, 0.6f, 0.15f) },
 
             // ---- Energy & safety ----
@@ -168,6 +171,17 @@ namespace DCT
 
             new FacilityDef { id = "elevator", name = "Elevator & Cable Riser", kind = FacilityKind.Elevator, room = RoomType.Corridor, cost = 30000, watts = 2000, level = 1,
                 desc = "Connects floors for staff and network cables. Place one at the same spot on each floor you want to link (in a Corridor).", color = new Color(0.55f, 0.6f, 0.68f) },
+
+            new FacilityDef { id = "evap", name = "Evaporative Cooler", kind = FacilityKind.Cooling, room = RoomType.ServerHall, cost = 7500, watts = 1800, coolingKW = 55, water = 0.1f, level = 2, research = 15000,
+                desc = "Cools 55 kW using a fraction of a CRAC's power, but evaporates water. Great in dry climates, weaker in humid ones, and hit hard by droughts.", color = new Color(0.55f, 0.8f, 0.85f) },
+            new FacilityDef { id = "heatx", name = "District Heat Exchanger", kind = FacilityKind.HeatExchanger, room = RoomType.Outdoor, w = 2, h = 1, cost = 45000, watts = 1500, heatKW = 200, noise = 58, level = 3, research = 30000,
+                desc = "Sells up to 200 kW of your servers' waste heat to the city's heating network. Pays most in cold cities and in winter; liquid-cooled halls give up far more heat than air-cooled ones.", color = new Color(0.85f, 0.4f, 0.25f) },
+            new FacilityDef { id = "access", name = "Access Control & CCTV", kind = FacilityKind.AccessControl, room = RoomType.Corridor, cost = 12000, watts = 400, level = 2, research = 8000,
+                desc = "Badge gates and cameras. Needed for a compliance certification, and makes break-ins harder.", color = new Color(0.25f, 0.3f, 0.4f) },
+            new FacilityDef { id = "dock", name = "Loading Dock", kind = FacilityKind.LoadingDock, room = RoomType.Outdoor, w = 2, h = 2, cost = 18000, level = 1,
+                desc = "Delivery trucks unload hardware orders here. Must touch the building. Without one, standard deliveries take twice as long.", color = new Color(0.5f, 0.5f, 0.45f) },
+            new FacilityDef { id = "soundwall", name = "Acoustic Barrier", kind = FacilityKind.SoundWall, room = RoomType.Outdoor, cost = 2500, level = 1,
+                desc = "A sound wall section. Cuts the noise of outdoor equipment within 2 tiles by 12 dB, keeping the neighbours happy.", color = new Color(0.45f, 0.5f, 0.42f) },
 
             // ---- Office ----
             new FacilityDef { id = "desk", model = "desk", name = "Technician Desk", kind = FacilityKind.Desk, room = RoomType.Office, cost = 1100, watts = 300, staff = 1, level = 1,
@@ -200,7 +214,7 @@ namespace DCT
                     foreach (var f in data.facilities)
                     {
                         int i = Facilities.FindIndex(x => x.id == f.id);
-                        if (i >= 0) { if (string.IsNullOrEmpty(f.model)) f.model = Facilities[i].model; if (f.capacityKWh <= 0) f.capacityKWh = Facilities[i].capacityKWh; Facilities[i] = f; }
+                        if (i >= 0) { if (string.IsNullOrEmpty(f.model)) f.model = Facilities[i].model; if (f.capacityKWh <= 0) f.capacityKWh = Facilities[i].capacityKWh; if (f.noise <= 0) f.noise = Facilities[i].noise; if (f.water <= 0) f.water = Facilities[i].water; if (f.heatKW <= 0) f.heatKW = Facilities[i].heatKW; Facilities[i] = f; }
                         else Facilities.Add(f);
                     }
                 deviceMap = null; facilityMap = null;
@@ -272,6 +286,10 @@ namespace DCT
                 case FacilityKind.Suppression: return "Fire Safety";
                 case FacilityKind.Battery: return "Battery Storage";
                 case FacilityKind.Elevator: return "Vertical";
+                case FacilityKind.HeatExchanger: return "Heat Reuse";
+                case FacilityKind.AccessControl: return "Security";
+                case FacilityKind.LoadingDock: return "Logistics";
+                case FacilityKind.SoundWall: return "Noise Control";
             }
             return k.ToString();
         }

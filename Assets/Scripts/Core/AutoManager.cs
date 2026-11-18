@@ -80,6 +80,10 @@ namespace DCT
 
             EnsureInfrastructure(sim);
 
+            // Bid on tenders a little under budget; pay down loans once cash is comfortable.
+            foreach (var r in S.rfps) if (r.bidMul <= 0) sim.PlaceBid(r, 0.92f);
+            foreach (var l in S.loans.ToList()) if (S.money > l.balance * 3 + 200000) sim.Repay(l);
+
             if (!sim.IsUnlocked("gen") && S.Level >= 2 && S.money > 30000) sim.Research("gen");
             foreach (var c in S.contracts.Where(x => x.status == ContractStatus.Setup || x.status == ContractStatus.Active).ToList())
                 Provision(sim, c);
@@ -118,6 +122,11 @@ namespace DCT
                 TryPlaceAnywhere(sim, Catalog.Facility("solar"), out _);
             if (sim.ObjectsOfKind(FacilityKind.CoreSwitch).Count() < 2 && S.Level >= 3 && S.money > 60000)
                 TryPlaceAnywhere(sim, Catalog.Facility("core_10g"), out _);
+            if (S.city.heatPrice >= 0.03f && S.money > 250000 && !sim.ObjectsOfKind(FacilityKind.HeatExchanger).Any())
+            {
+                if (!sim.IsUnlocked("heatx") && S.Level >= Catalog.Facility("heatx").level) sim.Research("heatx");
+                if (sim.IsUnlocked("heatx")) TryPlaceAnywhere(sim, Catalog.Facility("heatx"), out _);
+            }
             if (sim.IsUnlocked("gen") && sim.genKW < sim.loadKW && S.money > 70000)
                 TryPlaceAnywhere(sim, Catalog.Facility("gen"), out _);
             if (sim.bwDemand > sim.ispNominal * 0.7f && S.money > 30000)
@@ -211,13 +220,13 @@ namespace DCT
                 if (dev == null) return;
                 sim.racks.TryGetValue(rack.id, out var info);
                 if (info != null && info.loadKW + dev.watts / 1000f > Catalog.Facility(rack.def).rackKW) { rack = GetRack(sim, c); if (rack == null) return; FixRack(sim, rack); }
-                if (sim.AddDevice(rack, dev) == null) return;
+                if (sim.AddDevice(rack, dev, true) == null) return;
                 // Make sure switch ports keep up.
                 sim.Recompute();
                 if (sim.racks.TryGetValue(rack.id, out info) && info.servers > info.ports)
                 {
                     var sw = Best(Catalog.Devices.Where(d => d.kind == DeviceKind.Switch && sim.IsUnlocked(d.id)), d => d.cost);
-                    sim.AddDevice(rack, sw);
+                    sim.AddDevice(rack, sw, true);
                 }
             }
         }
@@ -270,7 +279,7 @@ namespace DCT
             if (!rack.devices.Any(d => Catalog.Device(d.def).kind == DeviceKind.Switch))
             {
                 var sw = Catalog.Devices.Where(d => d.kind == DeviceKind.Switch && sim.IsUnlocked(d.id)).OrderByDescending(d => d.uplinkGbps).First();
-                sim.AddDevice(rack, sw);
+                sim.AddDevice(rack, sw, true);
             }
             if (rack.linkCore < 0 && sim.AutoConnect(rack) != null) LayTrayToCore(sim, rack);
             var con = rack.contractId > 0 ? sim.FindContract(rack.contractId) : null;

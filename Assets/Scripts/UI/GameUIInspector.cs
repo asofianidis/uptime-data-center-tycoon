@@ -16,12 +16,13 @@ namespace DCT
             foreach (var o in gm.selection)
             {
                 sb.Append(o.id).Append(':').Append(o.contractId).Append(':').Append(o.linkCore).Append(':').Append(o.linkCore2)
-                  .Append(o.dualPdu ? 'P' : 'p').Append(o.pduTripped ? 'T' : 't').Append(o.failed ? 'F' : 'f').Append(o.rot).Append('[');
+                  .Append(o.dualPdu ? 'P' : 'p').Append(o.pduTripped ? 'T' : 't').Append(o.failed ? 'F' : 'f').Append(o.rot)
+                  .Append(o.maintQueued ? 'Q' : 'q').Append(o.inMaint ? 'M' : 'm').Append(o.servicedHour).Append('o').Append(o.orders.Count).Append(o.orders.Count(x => x.arrived)).Append('[');
                 foreach (var d in o.devices) sb.Append(d.id).Append(d.failed ? 'x' : '-').Append((int)(Simulation.AgeYears(d) * 2)).Append(',');
                 sb.Append(']');
             }
             sb.Append('|').Append(string.Join(",", S.contracts.Where(c => c.status == ContractStatus.Setup || c.status == ContractStatus.Active).Select(c => c.id)));
-            sb.Append('|').Append(S.unlocked.Count).Append('|').Append(Templates.All.Count).Append('|').Append(showAllAssign).Append('|').Append(Sim.objectsVersion);
+            sb.Append('|').Append(S.unlocked.Count).Append('|').Append(Templates.All.Count).Append('|').Append(showAllAssign).Append('|').Append(Sim.objectsVersion).Append('|').Append(S.shipExpress);
             return sb.ToString();
         }
 
@@ -42,7 +43,7 @@ namespace DCT
             if (sel.Count == 1 && Catalog.Facility(sel[0].def).kind == FacilityKind.Rack)
             {
                 var o0 = sel[0];
-                Tabs(p, inspectorSection, "insp", "Overview", "Connections", $"Hardware ({o0.devices.Count})", "Install");
+                Tabs(p, inspectorSection, "insp", "Overview", "Connections", $"Hardware ({o0.devices.Count}{(o0.orders.Count > 0 ? $"+{o0.orders.Count}" : "")})", "Install");
             }
             else if (sel.Count > 1 && sel.Any(o => Catalog.Facility(o.def).kind == FacilityKind.Rack))
                 Tabs(p, inspectorSection, "inspMulti", "Overview", "Bulk", "Install");
@@ -108,6 +109,9 @@ namespace DCT
             K.Text(s, c, () => { var i = Info(o); return i == null ? "" : $"Cores: {i.cores}   Storage: {i.storage:0} TB   GPUs: {i.gpus}"; });
             K.Text(s, c, () => { var i = Info(o); return i != null && i.zone >= 0 && i.zone < Sim.zones.Count ? $"Hall temp: {Sim.zones[i.zone].temp:0.0} C" : ""; });
             if (o.floor > 0) K.Text(c, $"On floor {o.floor + 1}", "dim");
+            if (o.orders.Count > 0) K.Text(c, $"{o.orders.Count(x => !x.arrived)} item(s) on order, {o.orders.Count(x => x.arrived)} delivered awaiting install (Hardware tab)", "small", "warn");
+            if (Sim.CageOf(o) > 0) K.Text(c, $"Inside private cage #{Sim.CageOf(o)}", "small", "dim");
+            MaintenanceBlock(c, s, o);
 
             // Customer
             K.Text(c, "CUSTOMER", "section-title");
@@ -118,6 +122,7 @@ namespace DCT
                 K.Swatch(row, Catalog.CustomerColors[con.colorIdx]);
                 K.Text(row, $"{con.customer} ({Catalog.TypeName(con.type)})", "bold");
                 if (con.type == ContractType.Colocation) K.Text(c, $"Customer gear: {con.reqKWPerRack:0} kW in this rack (they bring their own servers)", "dim");
+                K.Text(c, $"Customer peak hours: {Simulation.PeakText(con)}", "small", "dim");
                 var b = K.Row(c);
                 K.Small(b, "Unassign", () => Sim.Assign(o, null));
                 K.Small(b, "View contract", () => { OpenWindow(Window.Contracts); gm.view.highlightContract = con.id; });
@@ -199,6 +204,19 @@ namespace DCT
 
         void RackHardware(VisualElement c, Scope s, PlacedObject o)
         {
+            if (o.orders.Count > 0)
+            {
+                K.Text(c, "ON ORDER", "section-title");
+                foreach (var ord in o.orders.OrderBy(x => x.arriveHour).ToList())
+                {
+                    var od = ord;
+                    var row = K.Row(c, "card");
+                    K.Text(row, $"U{ord.u + 1:00}  {Catalog.Device(ord.def)?.name}", "small").style.width = 170;
+                    K.Text(s, row, () => od.arrived ? "Delivered - waiting for a technician" : $"Arrives in {HoursToText(od.arriveHour - S.hour)}", "small", od.arrived ? "good" : "dim");
+                    K.Flex(row);
+                    if (!ord.arrived) K.Small(row, "Cancel (90% refund)", () => Report(Sim.CancelOrder(o, od)));
+                }
+            }
             K.Text(c, "INSTALLED HARDWARE", "section-title");
             if (o.devices.Count == 0) K.Text(c, "Nothing installed - see the Install tab.", "dim");
             foreach (var dev in o.devices.OrderByDescending(x => x.u).ToList())
@@ -254,6 +272,11 @@ namespace DCT
         void DeviceShop(VisualElement c, Scope s, List<PlacedObject> racks)
         {
             bool multi = racks.Count > 1;
+            var ship = K.Row(c, "card");
+            K.Text(ship, "Shipping:", "small").style.width = 70;
+            K.Btn(s, ship, () => $"Standard ({Sim.LeadHours(Catalog.Devices[0]) / 24}d+)", () => S.shipExpress = false, null, () => !S.shipExpress).style.flexGrow = 1;
+            K.Btn(s, ship, () => $"Express +{(Sim.ExpressMul - 1f) * 100:0}% (instant)", () => S.shipExpress = true, null, () => S.shipExpress).style.flexGrow = 1;
+            K.Text(s, c, () => S.shipExpress ? "Express: installed immediately at a premium." : $"Standard: a truck delivers in {Sim.LeadHours(Catalog.Devices[0]) / 24}+ days{(Sim.HasDock ? "" : " (build a Loading Dock to halve that)")}, then a technician installs it. Shortages add weeks.", "small", "dim", "wrap");
             foreach (var dd in Catalog.Devices)
             {
                 if (!Sim.IsUnlocked(dd.id)) continue;
@@ -263,8 +286,8 @@ namespace DCT
                 K.Swatch(head, dd.color, 10);
                 K.Text(head, dd.name, "bold");
                 K.Flex(head);
-                var price = K.Text(s, head, () => K.Money(Sim.DeviceCost(def)));
-                K.DynClass(s, price, () => S.money >= Sim.DeviceCost(def) ? "good" : "bad");
+                var price = K.Text(s, head, () => K.Money(Sim.OrderPrice(def, S.shipExpress)) + (S.shipExpress ? "" : $"  ({Sim.LeadHours(def) / 24}d)"));
+                K.DynClass(s, price, () => S.money >= Sim.OrderPrice(def, S.shipExpress) ? "good" : "bad");
                 string spec = dd.kind == DeviceKind.Switch
                     ? $"{dd.heightU}U  {dd.ports} ports  {dd.uplinkGbps:0}G uplink  {dd.watts:0}W"
                     : $"{dd.heightU}U  {dd.cores} cores  {dd.storageTB:0}TB" + (dd.gpus > 0 ? $"  {dd.gpus} GPU" : "") + $"  {dd.watts:0}W";
@@ -281,10 +304,11 @@ namespace DCT
                         {
                             var rd = Catalog.Facility(r.def);
                             float load = Info(r)?.loadKW ?? 0;
-                            int byPower = Mathf.FloorToInt((rd.rackKW - load) / (def.watts / 1000f));
+                            float pending = r.orders.Sum(x => (Catalog.Device(x.def)?.watts ?? 0) / 1000f);
+                            int byPower = Mathf.FloorToInt((rd.rackKW - load - pending) / (def.watts / 1000f));
                             n += Sim.FillRack(r, def, Mathf.Max(0, byPower));
                         }
-                        Toast($"Installed {n} x {def.name}.", 1);
+                        Toast(S.shipExpress ? $"Installed {n} x {def.name}." : $"Ordered {n} x {def.name}.", 1);
                     }, any);
                 var why = K.Text(s, card, () => any() || racks.Count == 0 ? "" : Sim.CanAddDevice(racks[0], def) ?? "", "dim");
                 K.Show(s, why, () => why.text.Length > 0);
@@ -305,7 +329,7 @@ namespace DCT
                 row.Add(tf);
                 K.Small(row, $"Save #{src.id} as template", () => { Templates.All.Add(Templates.FromRack(src, templateName)); Templates.Save(); Toast($"Template \"{templateName}\" saved.", 1); inspectorSection.Invalidate(); });
             }
-            var empties = racks.Where(r => r.devices.Count == 0).ToList();
+            var empties = racks.Where(r => r.devices.Count == 0 && r.orders.Count == 0).ToList();
             foreach (var t in Templates.All.ToList())
             {
                 var tt = t;
@@ -333,12 +357,28 @@ namespace DCT
             var fix = K.Btn(s, c, () => $"Emergency repair now ({K.Money(cost)})", () => Sim.ManualRepair(o, null), () => S.money >= cost);
             K.Show(s, fix, () => o.failed);
             if (o.floor > 0) K.Text(c, $"On floor {o.floor + 1}", "dim");
+            MaintenanceBlock(c, s, o);
+            if (d.noise > 0)
+            {
+                var nz = K.Text(s, c, () =>
+                {
+                    float l = Sim.NoiseAtNeighbours(o, true);
+                    return $"Noise at the houses to the {Simulation.SideNames[Sim.ResidentialSide]}: {l:0} dB{(d.kind == FacilityKind.Generator ? " when running" : "")} (limit {S.city.noiseLimit:0} dB, {S.city.noiseLimit - 5:0} at night)" + (Sim.HasSoundWallNear(o) ? " - behind a sound wall" : "");
+                }, "small", "wrap");
+                K.DynClass(s, nz, () => Sim.NoiseAtNeighbours(o, true) > S.city.noiseLimit - 5 ? "warn" : "dim");
+            }
             K.Space(c, 4);
             switch (d.kind)
             {
                 case FacilityKind.Cooling:
                     K.Text(c, $"Cooling capacity: {d.coolingKW:0} kW (x{S.city.coolingFactor:0.00} climate)");
                     K.Text(c, $"Power draw: {d.watts / 1000f:0.0} kW");
+                    if (d.water > 0)
+                    {
+                        K.Text(s, c, () => $"Evaporative: x{Sim.EvapFactor:0.00} capacity at {S.city.humidity * 100:0}% humidity{(S.events.Any(e => e.type == "drought") ? " (drought!)" : "")}", "small", "wrap");
+                        K.Text(s, c, () => $"Site water use: {Sim.waterM3Hour:0.00} m3/h at ${Sim.WaterPriceNow:0.00}/m3 ({K.Money(Sim.waterM3Hour * Sim.WaterPriceNow * Catalog.HoursPerMonth)}/mo)", "small", "dim");
+                    }
+                    if (Simulation.IsLiquid(d)) K.Text(c, "Liquid-cooled halls give up far more heat to a District Heat Exchanger.", "small", "dim", "wrap");
                     K.Text(s, c, () => { int zi = Sim.ZoneAt(o); return zi >= 0 ? $"Hall temperature: {Sim.zones[zi].temp:0.0} C   Heat {Sim.zones[zi].heatKW:0.0} / {Sim.zones[zi].coolKW:0.0} kW cooling" : "Not in a server hall!"; }, "wrap");
                     K.Bar(s, c, () => { int zi = Sim.ZoneAt(o); return zi >= 0 && Sim.zones[zi].coolKW > 0 ? Sim.zones[zi].heatKW / Sim.zones[zi].coolKW : 1; },
                         () => { int zi = Sim.ZoneAt(o); return zi >= 0 && Sim.zones[zi].heatKW > Sim.zones[zi].coolKW ? new Color(1, 0.3f, 0.2f) : new Color(0.3f, 0.7f, 1f); }, null, 10);
@@ -390,6 +430,23 @@ namespace DCT
                     K.Bar(s, c, () => o.charge / Mathf.Max(1, d.capacityKWh), () => new Color(0.3f, 0.9f, 0.5f), null, 10);
                     K.Text(s, c, () => Sim.outageActive ? "Backing up the grid" : Sim.TimeOfDayPriceMul < 1f ? "Charging (cheap night power)" : Sim.TimeOfDayPriceMul > 1f ? "Discharging (evening peak)" : "Holding", "dim");
                     break;
+                case FacilityKind.HeatExchanger:
+                    K.Text(s, c, () => $"Exporting {Sim.heatExportKW:0} / {Sim.heatCapKW:0} kW at ${Sim.HeatPriceNow:0.000}/kWh (season x{Sim.HeatSeason:0.00})");
+                    K.Text(s, c, () => $"Earning {K.Money(Sim.heatRevenueHour * 24)}/day   Heat sold so far {K.Money(S.heatSoldTotal)}", "small");
+                    K.Text(c, S.city.heatPrice <= 0 ? "Nobody in this city buys heat - it's too warm." : "Air-cooled halls recover 35% of their heat, liquid-cooled up to 90%. Winter pays best.", "small", "dim", "wrap");
+                    break;
+                case FacilityKind.AccessControl:
+                    K.Text(c, "Counts towards the site's compliance certification and stops half of break-in attempts.", "small", "dim", "wrap");
+                    K.Btn(c, "Open Sites > Compliance", () => { OpenWindow(Window.Sites); SetTab("sites", 2, windowSection); });
+                    break;
+                case FacilityKind.LoadingDock:
+                    K.Text(s, c, () => $"Orders in transit to this site: {Sim.PendingOrders}", "small");
+                    K.Text(c, "Standard hardware deliveries take half as long with a dock.", "small", "dim");
+                    break;
+                case FacilityKind.SoundWall:
+                    K.Text(s, c, () => $"Noise at the houses to the {Simulation.SideNames[Sim.ResidentialSide]} right now: {Sim.noiseNow:0} dB (limit {Sim.NoiseLimitNow:0})", "small", "wrap");
+                    K.Text(c, "Cuts the noise of outdoor equipment within 2 tiles by 12 dB.", "small", "dim");
+                    break;
                 case FacilityKind.Elevator:
                 {
                     var floors = Enumerable.Range(0, GameState.MaxFloors).Where(f => { var e = Sim.ObjectAtF(f, o.x, o.y); return e != null && Catalog.Facility(e.def).kind == FacilityKind.Elevator; }).Select(f => f + 1).ToList();
@@ -401,6 +458,28 @@ namespace DCT
             if (!Sim.IsReachable(o)) K.Text(c, "No clear walking access: repairs take 50% longer.", "warn");
             K.Space(c, 8);
             K.Btn(c, $"Remove (refund {K.Money(Sim.RemovalRefund(o))})", ConfirmRemoveSelection);
+        }
+
+        void MaintenanceBlock(VisualElement c, Scope s, PlacedObject o)
+        {
+            var d = Catalog.Facility(o.def);
+            if (!Simulation.Serviceable(d) || (d.kind == FacilityKind.Rack && o.devices.Count == 0)) return;
+            K.Text(c, "MAINTENANCE", "section-title");
+            var t = K.Text(s, c, () =>
+            {
+                float m = Sim.ServiceAgeMonths(o);
+                string state = o.inMaint ? "Being serviced now" + (Sim.MaintSafe(o) ? " (stays online)" : " - offline!") :
+                               o.maintQueued ? (o.maintNow || !S.maintNightOnly ? "Queued for the next free technician" : "Queued for the night window") : Sim.MaintDue(o) ? "Overdue" : "OK";
+                return $"Last serviced {m:0.0} months ago - failure rate x{Simulation.ServiceFactorFor(m):0.00}.   {state}";
+            }, "small", "wrap");
+            K.DynClass(s, t, () => o.inMaint ? "warn" : Sim.MaintDue(o) ? "warn" : "dim");
+            var row = K.Row(c);
+            if (o.maintQueued) K.Small(row, "Cancel service", () => Sim.CancelMaintenance(o));
+            else K.Small(row, $"Service now ({K.Money(Sim.MaintCost(o))})", () => Report(Sim.QueueMaintenance(o, true)));
+            if (!o.maintQueued) K.Small(row, "Service tonight", () => Report(Sim.QueueMaintenance(o, false)));
+            if (d.kind == FacilityKind.Rack && !Sim.MaintSafe(o)) K.Text(c, "Goes offline while serviced - fit dual PDUs and two ToR switches to keep it running.", "small", "dim", "wrap");
+            var risk = K.Text(s, c, () => { var r = Sim.MaintRisk(o); return r != null ? r + ". Auto-maintenance skips it." : ""; }, "small", "warn", "wrap");
+            K.Show(s, risk, () => risk.text.Length > 0);
         }
 
         void MultiInspector(VisualElement c, Scope s, List<PlacedObject> sel)

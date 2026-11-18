@@ -14,6 +14,7 @@ namespace DCT.Tests
         {
             var s = Simulation.NewGame(42, "Normal", "sandbox");
             sim = new Simulation(s);
+            sim.S.shipExpress = true;   // tests install hardware instantly unless they test deliveries
             AutoManager.BuildStarter(sim);
             sim.S.money = 50_000_000;
             int w = s.ownX1 - s.ownX0, h = s.ownY1 - s.ownY0;

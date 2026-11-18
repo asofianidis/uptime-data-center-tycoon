@@ -105,9 +105,24 @@ namespace DCT
             }
             foreach (var sim in sims)
             {
+                // Spot-market customers on idle racks also need WAN capacity.
+                sim.spotGbps = sim.SpotDemandGbps();
+                sim.bwDemand += sim.spotGbps;
                 sim.bwDemand *= sim.SiteEventMag("surge", 1f);
                 sim.netQuality = sim.bwDemand <= 0.001f ? 1f : Mathf.Min(1f, sim.ispGbps / sim.bwDemand);
             }
+
+            // Which customers occupy each hall and each cage (for dedicated-hall and private-cage rules).
+            zoneUsers.Clear(); cageUsers.Clear();
+            if (S.contracts.Any(c => (c.anchor || c.caged) && (c.status == ContractStatus.Setup || c.status == ContractStatus.Active)))
+                foreach (var (sim, r) in AllRacks())
+                {
+                    if (r.contractId <= 0) continue;
+                    int z = sim.ZoneAt(r);
+                    if (z >= 0) Users(zoneUsers, (sim, z)).Add(r.contractId);
+                    int cg = sim.CageOf(r);
+                    if (cg > 0) Users(cageUsers, (sim, cg)).Add(r.contractId);
+                }
 
             provision.Clear();
             var none = new List<(Simulation, PlacedObject)>();
@@ -118,16 +133,34 @@ namespace DCT
             }
         }
 
+        readonly Dictionary<(Simulation, int), HashSet<int>> zoneUsers = new Dictionary<(Simulation, int), HashSet<int>>();
+        readonly Dictionary<(Simulation, int), HashSet<int>> cageUsers = new Dictionary<(Simulation, int), HashSet<int>>();
+
+        static HashSet<int> Users(Dictionary<(Simulation, int), HashSet<int>> d, (Simulation, int) k)
+        {
+            if (!d.TryGetValue(k, out var set)) d[k] = set = new HashSet<int>();
+            return set;
+        }
+
         Provision Evaluate(Contract c, List<(Simulation sim, PlacedObject o)> list)
         {
             var p = new Provision();
             string rackIssue = null;
-            int assigned = 0, nonRedundant = 0;
+            int assigned = 0, nonRedundant = 0, uncertified = 0, uncaged = 0, shared = 0;
             bool saturated = false;
             var onlineSites = new HashSet<Simulation>();
+            var cages = new HashSet<(Simulation, int)>();
             foreach (var (sim, o) in list)
             {
                 assigned++;
+                if (c.compliance && !sim.Certified(sim.Site)) uncertified++;
+                if (c.caged)
+                {
+                    int cg = sim.CageOf(o);
+                    if (cg == 0) uncaged++;
+                    else cages.Add((sim, cg));
+                }
+                if (c.anchor && sim.ZoneAt(o) is int az && az >= 0 && zoneUsers.TryGetValue((sim, az), out var zu) && zu.Count > 1) shared++;
                 if (!sim.racks.TryGetValue(o.id, out var info)) continue;
                 if (!info.online) { rackIssue ??= (MultiSite ? $"[{sim.Site.name}] " : "") + info.issue; continue; }
                 if (c.redundant && !info.redundant) nonRedundant++;
@@ -181,6 +214,26 @@ namespace DCT
             if (need == null && c.geoRedundant && onlineSites.Count < 2)
             {
                 need = "Geo-redundancy required: online racks in at least 2 sites";
+                p.service = Mathf.Min(p.service, 0.97f);
+            }
+            if (need == null && uncertified > 0)
+            {
+                need = $"Compliance required: {uncertified} rack(s) in a site without a valid audit certificate";
+                p.service = Mathf.Min(p.service, 0.97f);
+            }
+            if (need == null && c.caged)
+            {
+                // One private cage holding only this customer's racks.
+                bool othersInCage = cages.Any(cg => cageUsers.TryGetValue(cg, out var cu) && cu.Count > 1);
+                if (uncaged > 0 || cages.Count > 1 || othersInCage)
+                {
+                    need = uncaged > 0 ? $"Private cage required: {uncaged} rack(s) outside a cage" : cages.Count > 1 ? "Private cage required: racks are split across cages" : "Private cage required: another customer's racks share the cage";
+                    p.service = Mathf.Min(p.service, 0.97f);
+                }
+            }
+            if (need == null && shared > 0)
+            {
+                need = $"Dedicated hall required: {shared} rack(s) share a hall with other customers";
                 p.service = Mathf.Min(p.service, 0.97f);
             }
             if (need != null && assigned == 0) need = "No racks assigned";

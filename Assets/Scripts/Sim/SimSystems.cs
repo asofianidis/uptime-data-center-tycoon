@@ -65,6 +65,7 @@ namespace DCT
             def = Catalog.Facility(core.def);
             if (def == null) { issue = "Not cabled to a core switch"; return false; }
             if (core.failed) { issue = "Core switch failed"; return false; }
+            if (core.inMaint) { issue = "Core switch under maintenance"; return false; }
             if (S.RoomAt(core.floor, core.x, core.y) != RoomType.Network) { issue = "Core switch outside network room"; return false; }
             return true;
         }
@@ -134,7 +135,7 @@ namespace DCT
         public string MakeRedundant(PlacedObject rack)
         {
             if (!rack.dualPdu) { var e = BuyDualPdu(rack); if (e != null) return e; }
-            int sw = rack.devices.Count(d => Catalog.Device(d.def)?.kind == DeviceKind.Switch);
+            int sw = rack.devices.Concat(rack.orders).Count(d => Catalog.Device(d.def)?.kind == DeviceKind.Switch);
             if (sw < 2)
             {
                 var existing = rack.devices.Select(d => Catalog.Device(d.def)).FirstOrDefault(d => d.kind == DeviceKind.Switch);
@@ -185,7 +186,7 @@ namespace DCT
             foreach (var o in S.objects)
             {
                 var d = Catalog.Facility(o.def);
-                if (d != null && d.kind == FacilityKind.Solar && !o.failed) solarCapKW += d.supplyKW;
+                if (d != null && d.kind == FacilityKind.Solar && !o.failed && !o.inMaint) solarCapKW += d.supplyKW;
             }
             solarKW = solarCapKW * SunCurve(S.hour % 24) * WeatherSolar * S.city.solarFactor;
         }
@@ -200,7 +201,7 @@ namespace DCT
             foreach (var o in S.objects)
             {
                 var d = Catalog.Facility(o.def);
-                if (d == null || d.kind != FacilityKind.Battery || o.failed) continue;
+                if (d == null || d.kind != FacilityKind.Battery || o.failed || o.inMaint) continue;
                 if (outageActive)
                 {
                     float use = Mathf.Min(d.supplyKW, o.charge);
@@ -396,11 +397,11 @@ namespace DCT
                 {
                     if (!S.InBounds(x, y) || S.HasFlag(x, y, flag)) continue;
                     var room = S.Room(x, y);
-                    if (flag == GameState.FlagRaised && room != RoomType.ServerHall) continue;
+                    if ((flag == GameState.FlagRaised || flag == GameState.FlagCage) && room != RoomType.ServerHall) continue;
                     if (flag == GameState.FlagTray && room == RoomType.None && (S.floor > 0 || !S.Owned(x, y))) continue;
                     tiles.Add(S.Idx(S.floor, x, y));
                 }
-            cost = tiles.Count * (flag == GameState.FlagTray ? TrayCost : RaisedCost);
+            cost = tiles.Count * (flag == GameState.FlagTray ? TrayCost : flag == GameState.FlagCage ? CageCost : RaisedCost);
             if (!apply || tiles.Count == 0) return tiles.Count;
             Checkpoint();
             if (!Spend(cost)) { Log("Not enough money.", 2); return 0; }
@@ -544,9 +545,9 @@ namespace DCT
 
         public bool HasDesk(StaffMember m) => ShiftRank(m) < deskCount;
         public int ShiftCount(string shift) => S.staff.Count(m => (m.shift ?? "Day") == shift);
-        public int WorkingStaffCount => S.staff.Count(m => OnShift(m) && HasDesk(m));
-        public int EffectiveTechs => S.staff.Count(m => OnShift(m) && HasDesk(m) && m.role != "Security");
-        public int SecurityLevel => S.staff.Where(m => OnShift(m) && HasDesk(m) && m.role == "Security").Sum(m => m.skill);
+        public int WorkingStaffCount => S.staff.Count(m => OnShift(m) && HasDesk(m) && !Training(m));
+        public int EffectiveTechs => S.staff.Count(m => OnShift(m) && HasDesk(m) && m.role != "Security" && !Training(m));
+        public int SecurityLevel => S.staff.Where(m => OnShift(m) && HasDesk(m) && m.role == "Security" && !Training(m)).Sum(m => m.skill);
 
         public void SetShift(StaffMember m, string shift)
         {
@@ -581,11 +582,13 @@ namespace DCT
             return HireCandidate(c, shift);
         }
 
-        public void FireStaff(StaffMember m)
+        public void FireStaff(StaffMember m) => FireStaff(m, true);
+
+        void FireStaff(StaffMember m, bool log)
         {
             if (!S.staff.Remove(m)) return;
             foreach (var t in S.tickets) if (t.assigned == m.id) t.assigned = -1;
-            Log($"{m.name} has left the company.", 0);
+            if (log) Log($"{m.name} has left the company.", 0);
         }
 
         public void Fire() { if (S.staff.Count > 0) FireStaff(S.staff[S.staff.Count - 1]); }
@@ -722,6 +725,12 @@ namespace DCT
                 if (o.pduTripped && !taken.Contains($"{o.id}:-2:-1")) jobs.Add(new Job { obj = o, kind = "pdu", work = 3 });
                 foreach (var d in o.devices)
                     if (d.failed && !taken.Contains($"{o.id}:{d.id}:-1")) jobs.Add(new Job { obj = o, dev = d, kind = "device", work = 4 });
+                if (!o.failed && MaintJobOpen(o) && !taken.Contains($"{o.id}:-3:-1")) jobs.Add(new Job { obj = o, kind = "maint", work = MaintWork(o) });
+                if (o.orders.Count > 0 && !taken.Contains($"{o.id}:-4:-1"))
+                {
+                    int n = o.orders.Count(x => x.arrived);
+                    if (n > 0) jobs.Add(new Job { obj = o, kind = "install", work = Mathf.Max(1f, n * 0.5f) });
+                }
             }
             foreach (var t in S.tickets)
             {
@@ -734,6 +743,14 @@ namespace DCT
 
         static bool RoleMatches(string role, Job j)
         {
+            var fk = Catalog.Facility(j.obj.def).kind;
+            if (j.kind == "maint")
+            {
+                if (fk == FacilityKind.Rack) return role == "Technician";
+                if (fk == FacilityKind.CoreSwitch || fk == FacilityKind.Isp || fk == FacilityKind.AccessControl) return role == "NetEngineer";
+                return role == "Electrician";
+            }
+            if (j.kind == "install") return role == "Technician";
             switch (role)
             {
                 case "Electrician":
@@ -762,6 +779,7 @@ namespace DCT
                 case "facility": return 0;
                 case "pdu": return 1;
                 case "device": return 2;
+                case "maint": return 4;
                 default: return 3;
             }
         }
@@ -792,6 +810,10 @@ namespace DCT
         void StaffTick()
         {
             unreachable.Clear();
+            // Maintenance only takes equipment offline while someone is actually working on it.
+            foreach (var o in S.objects)
+                if (o.inMaint && !S.staff.Any(m => m.state == "working" && m.taskObj == o.id && m.taskDev == -3 && OnShift(m) && !Training(m)))
+                { o.inMaint = false; MarkDirty(o); }
             // Migrate legacy saves that only tracked a technician count.
             if (S.technicians > 0 && S.staff.Count == 0)
             {
@@ -811,7 +833,7 @@ namespace DCT
                 m.px = m.x; m.py = m.y;
                 int rank = ShiftRank(m);
                 bool hasDesk = rank < deskCount;
-                if (!OnShift(m) || !hasDesk)
+                if (!OnShift(m) || !hasDesk || Training(m))
                 {
                     // Off shift (or no desk): go home, release any task, recover.
                     if (m.state != "off")
@@ -850,7 +872,7 @@ namespace DCT
                         {
                             jobs.Remove(mine);
                             m.taskObj = mine.obj.id;
-                            m.taskDev = mine.kind == "pdu" ? -2 : mine.dev != null ? mine.dev.id : -1;
+                            m.taskDev = mine.kind == "pdu" ? -2 : mine.kind == "maint" ? -3 : mine.kind == "install" ? -4 : mine.dev != null ? mine.dev.id : -1;
                             m.taskTicket = mine.ticket != null ? mine.ticket.id : -1;
                             if (mine.ticket != null) mine.ticket.assigned = m.id;
                             m.work = squeezed ? -mine.work * 0.5f : 0;   // awkward access: 50% longer
@@ -882,6 +904,7 @@ namespace DCT
                     float rate = (0.7f + 0.2f * m.skill) * FatigueMul(m);
                     var job = CurrentJob(m);
                     if (job == null) { m.state = "returning"; continue; }
+                    if (job.kind == "maint" && !job.obj.inMaint) { job.obj.inMaint = true; MarkDirty(job.obj); }
                     if (RoleMatches(m.role, job)) rate *= 1.5f;
                     m.work += rate;
                     if (m.work >= job.work) { CompleteJob(m, job); m.state = "returning"; m.path = null; }
@@ -921,6 +944,8 @@ namespace DCT
             if (!objById.TryGetValue(m.taskObj, out var o)) return false;
             if (m.taskTicket >= 0) return S.tickets.Any(t => t.id == m.taskTicket);
             if (m.taskDev == -2) return o.pduTripped;
+            if (m.taskDev == -3) return o.maintQueued && !o.failed;
+            if (m.taskDev == -4) return o.orders.Any(x => x.arrived);
             if (m.taskDev >= 0) return o.devices.Any(d => d.id == m.taskDev && d.failed);
             return o.failed;
         }
@@ -934,6 +959,8 @@ namespace DCT
                 return t == null ? null : new Job { obj = o, ticket = t, kind = "ticket", work = t.work };
             }
             if (m.taskDev == -2) return o.pduTripped ? new Job { obj = o, kind = "pdu", work = 3 } : null;
+            if (m.taskDev == -3) return o.maintQueued && !o.failed ? new Job { obj = o, kind = "maint", work = MaintWork(o) } : null;
+            if (m.taskDev == -4) { int n = o.orders.Count(x => x.arrived); return n > 0 ? new Job { obj = o, kind = "install", work = Mathf.Max(1f, n * 0.5f) } : null; }
             if (m.taskDev >= 0)
             {
                 var d = o.devices.FirstOrDefault(x => x.id == m.taskDev);
@@ -969,7 +996,14 @@ namespace DCT
                 case "ticket":
                     CompleteTicket(j.ticket, false);
                     break;
+                case "maint":
+                    CompleteMaintenance(m, j.obj);
+                    break;
+                case "install":
+                    InstallArrived(j.obj, m);
+                    break;
             }
+            GainXp(m, j.work);
             MarkDirty(j.obj);
             m.taskObj = m.taskDev = m.taskTicket = -1;
             Recompute();
@@ -1017,7 +1051,7 @@ namespace DCT
                 if (S.hour >= t.deadlineHour)
                 {
                     S.tickets.Remove(t);
-                    c.satisfaction = Mathf.Max(0, c.satisfaction - 10);
+                    AddSat(c, -10, $"Ticket missed: {t.text}");
                     S.ticketsMissed++;
                     foreach (var site in S.sites) foreach (var m in site.staff) if (m.taskTicket == t.id) { m.taskTicket = -1; m.state = "returning"; }
                     Log($"Missed a support ticket for {c.customer}: {t.text}. Satisfaction dropped.", 2);
@@ -1040,7 +1074,7 @@ namespace DCT
             var c = FindContract(t.contractId);
             if (c != null)
             {
-                c.satisfaction = Mathf.Min(100, c.satisfaction + (contractor ? 3 : 6));
+                AddSat(c, contractor ? 3 : 6, $"Ticket resolved{(contractor ? " by a contractor" : "")}: {t.text}");
                 S.money += t.fee; S.current.income += t.fee; S.lifetimeRevenue += t.fee;
                 Log($"Ticket resolved for {c.customer}: {t.text}. +${t.fee:N0}", 1);
             }
@@ -1179,13 +1213,16 @@ namespace DCT
                         S.firesFought++;
                         MarkDirty(rack);
                         Log($"Fire in rack #{rack.id}! The suppression system put it out; one device was damaged.", 2);
+                        InsuredLoss("fire", (Catalog.Device(dev.def)?.cost ?? 0) * 0.25f, $"fire damage in rack #{rack.id}");
                     }
                     else
                     {
                         int destroyed = Mathf.Min(rack.devices.Count, rng.Next(2, 6));
-                        for (int i = 0; i < destroyed; i++) rack.devices.RemoveAt(rng.Next(rack.devices.Count));
+                        float loss = 0;
+                        for (int i = 0; i < destroyed; i++) { int k = rng.Next(rack.devices.Count); loss += Catalog.Device(rack.devices[k].def)?.cost ?? 0; rack.devices.RemoveAt(k); }
                         foreach (var n in Racks.Where(r => r != rack && Mathf.Abs(r.x - rack.x) <= 1 && Mathf.Abs(r.y - rack.y) <= 1))
-                            foreach (var d in n.devices) if (rng.NextDouble() < 0.35) { d.failed = true; d.repairLeft = 4; MarkDirty(n); }
+                            foreach (var d in n.devices) if (rng.NextDouble() < 0.35) { d.failed = true; d.repairLeft = 4; MarkDirty(n); loss += (Catalog.Device(d.def)?.cost ?? 0) * 0.25f; }
+                        InsuredLoss("fire", loss, $"the fire in rack #{rack.id}");
                         MarkDirty(rack);
                         AddEvent("fire", 2, rack.id, "Fire");
                         Log($"FIRE in rack #{rack.id}! {destroyed} devices destroyed and neighbours damaged. Install fire suppression!", 3);
@@ -1204,6 +1241,7 @@ namespace DCT
                     foreach (var n in Racks.Where(r => Mathf.Abs(r.x - unit.x) <= 2 && Mathf.Abs(r.y - unit.y) <= 2))
                         foreach (var d in n.devices) if (rng.NextDouble() < 0.2) { d.failed = true; d.repairLeft = 4; hits++; MarkDirty(n); }
                     Log($"Coolant leak at {Catalog.Facility(unit.def).name} #{unit.id}! Unit offline, {hits} nearby devices shorted.", 3);
+                    InsuredLoss("leak", Catalog.Facility(unit.def).cost * 0.25f + hits * 1500f, "the coolant leak");
                     break;
                 }
                 case "ddos":
@@ -1215,13 +1253,13 @@ namespace DCT
                     if (rng.NextDouble() < Mathf.Min(0.9f, sec * 0.18f))
                     {
                         Log($"Your security team blocked a DDoS attack aimed at {c.customer}.", 1);
-                        c.satisfaction = Mathf.Min(100, c.satisfaction + 3);
+                        AddSat(c, 3, "Your security team blocked a DDoS attack");
                     }
                     else
                     {
                         int hours = rng.Next(6, 16);
                         AddEvent("surge", hours, 2.2f, "DDoS attack");
-                        c.satisfaction = Mathf.Max(0, c.satisfaction - 6);
+                        AddSat(c, -6, "Hit by a DDoS attack");
                         Log($"DDoS attack on {c.customer}! Bandwidth demand x2.2 for {hours}h. Hire Security staff to fend these off.", 3);
                     }
                     break;
@@ -1263,6 +1301,7 @@ namespace DCT
                 case "flood":
                 {
                     int dmg = 0, protectedRacks = 0;
+                    float loss = 0;
                     foreach (var o in S.objects)
                     {
                         var d = Catalog.Facility(o.def);
@@ -1272,13 +1311,14 @@ namespace DCT
                         if (d.kind == FacilityKind.Rack)
                         {
                             foreach (var dev in o.devices)
-                                if (dev.u < 3 && !dev.failed && rng.NextDouble() < 0.6) { dev.failed = true; dev.repairLeft = 4; dmg++; MarkDirty(o); }
+                                if (dev.u < 3 && !dev.failed && rng.NextDouble() < 0.6) { dev.failed = true; dev.repairLeft = 4; dmg++; MarkDirty(o); loss += (Catalog.Device(dev.def)?.cost ?? 0) * 0.25f; }
                         }
                         else if ((d.kind == FacilityKind.Ups || d.kind == FacilityKind.Switchgear || d.kind == FacilityKind.Battery) && !o.failed && rng.NextDouble() < 0.25)
                         {
-                            o.failed = true; o.repairLeft = 10; dmg++; MarkDirty(o);
+                            o.failed = true; o.repairLeft = 10; dmg++; MarkDirty(o); loss += d.cost * 0.25f;
                         }
                     }
+                    InsuredLoss("flood", loss, "flood damage");
                     if (dmg == 0 && protectedRacks > 0) { S.floodsSurvived++; Log("Flash flood! Raised floors kept all your hardware dry.", 1); }
                     else if (dmg > 0) Log($"Flash flood! Water reached the floor and damaged {dmg} device(s). Raised floors in server halls prevent this.", 3);
                     else Log("Flash flood nearby - no damage this time.", 2);
@@ -1286,7 +1326,9 @@ namespace DCT
                 }
                 case "breakin":
                 {
+                    bool gates = S.objects.Any(o => !o.failed && Catalog.Facility(o.def).kind == FacilityKind.AccessControl);
                     if (SecurityLevel >= 2 || rng.NextDouble() < SecurityLevel * 0.3f) { Log("Security stopped an attempted break-in at the loading dock.", 1); break; }
+                    if (gates && rng.NextDouble() < 0.5) { Log("Badge gates and cameras foiled an attempted break-in.", 1); break; }
                     var all = Racks.Where(r => r.devices.Count > 0 && r.contractId < 0).ToList();
                     if (all.Count == 0) break;
                     var rack = all[rng.Next(all.Count)];
@@ -1294,6 +1336,23 @@ namespace DCT
                     rack.devices.Remove(dev);
                     MarkDirty(rack);
                     Log($"Thieves stole a {Catalog.Device(dev.def).name} from rack #{rack.id}. Hire Security staff!", 3);
+                    OnSecurityBreach();
+                    InsuredLoss("theft", Catalog.Device(dev.def)?.cost ?? 0, $"a stolen {Catalog.Device(dev.def).name}");
+                    break;
+                }
+                case "drought":
+                {
+                    int days = rng.Next(15, 31);
+                    AddEvent("drought", days * 24, 3f, "Drought");
+                    bool evap = S.objects.Any(o => Catalog.Facility(o.def)?.water > 0);
+                    Log($"Drought! Water costs triple and evaporative coolers lose 40% of their capacity for {days} days.{(evap ? " Watch your hall temperatures." : "")}", 2);
+                    break;
+                }
+                case "efficiency":
+                {
+                    float amt = Mathf.Round(ProcGen.Range(rng, 20000, 50000) * (1 + S.Level * 0.3f) / 500f) * 500f;
+                    S.money += amt; S.current.bonuses += amt;
+                    Log($"Your efficient operation (PUE {CompanyPue:0.00}) won a ${amt:N0} green-energy grant!", 1);
                     break;
                 }
             }
@@ -1315,6 +1374,9 @@ namespace DCT
             new ScenarioDef { id = "aiboom", name = "AI Boom", desc = "Everyone wants GPUs. You start at level 5 with GPU servers researched.", goal = "Run 96 GPUs online for customers within 2 years.", days = 720 },
             new ScenarioDef { id = "blackout", name = "Blackout Belt", desc = "A storm-battered grid with constant outages. Generators are researched.", goal = "Complete 15 contracts with an average uptime of 99.9%+ within 2 years.", days = 720 },
             new ScenarioDef { id = "green", name = "Green Mandate", desc = "A heavy carbon tax and eco-conscious customers.", goal = "Hit 40% solar energy in a month while earning $100,000/month.", days = 1080 },
+            new ScenarioDef { id = "coldnorth", name = "Cold North", desc = "An arctic city with a hungry district-heating network. Heat exchangers and liquid cooling are researched.", goal = "Sell $250,000 of waste heat within 3 years.", days = 1080 },
+            new ScenarioDef { id = "turnaround", name = "Turnaround", desc = "You've taken over a struggling data center: aging hardware, overdue maintenance, unhappy customers and a $450,000 loan.", goal = "Pay off every loan and post $250,000 operating profit in a month within 2 years.", days = 720 },
+            new ScenarioDef { id = "edge", name = "Edge Network", desc = "Build a network of small edge sites. You start at reputation level 4 with extra funding.", goal = "Have online racks in 5 different cities within 3 years.", days = 1080 },
         };
 
         public static ScenarioDef Scenario(string id) => Scenarios.FirstOrDefault(s => s.id == id) ?? Scenarios[0];
@@ -1342,6 +1404,16 @@ namespace DCT
                     break;
                 case "blackout": s.city.disasterRate = 2.6f; s.unlocked.Add("gen"); break;
                 case "green": s.city.carbonTax = 0.07f; s.city.solarFactor = 1.2f; s.unlocked.Add("solar"); break;
+                case "coldnorth":
+                    s.city.climate = "Arctic"; s.city.coolingFactor = 1.35f; s.city.solarFactor = 0.6f;
+                    s.city.v3 = false; EnsureCityV3(s.city); s.city.heatPrice = 0.11f;
+                    s.city.blurb = "A frozen town that pays well for heat. " + s.city.blurb;
+                    s.unlocked.AddRange(new[] { "heatx", "liquid" });
+                    break;
+                case "edge":
+                    s.xp = Catalog.XpForLevel(4); s.peakLevel = 4;
+                    s.money += 400000;
+                    break;
             }
         }
 
@@ -1363,10 +1435,21 @@ namespace DCT
                     return Mathf.Min(1f, S.contractsCompleted / 15f) * (avg >= 99.9f ? 1f : 0.95f);
                 }
                 case "green": text = $"Solar {S.lastSolarShare * 100:0}% / 40%, ${MonthlyRevenue:N0} / $100,000"; return Mathf.Min(S.lastSolarShare / 0.4f, MonthlyRevenue / 100000f);
+                case "coldnorth": text = $"${S.heatSoldTotal:N0} / $250,000 of heat sold"; return S.heatSoldTotal / 250000f;
+                case "turnaround":
+                {
+                    float best = S.reports.Count > 0 ? S.reports.Max(r => r.Operating) : 0;
+                    text = $"Debt ${TotalDebt:N0}, best month ${best:N0} / $250,000";
+                    float debtPart = S.scenarioBaseline > 0 ? 1f - Mathf.Clamp01(TotalDebt / S.scenarioBaseline) : (TotalDebt <= 0 ? 1f : 0f);
+                    return 0.5f * debtPart + 0.5f * Mathf.Clamp01(best / 250000f);
+                }
+                case "edge": text = $"{EdgeSitesOnline} / 5 cities with online racks"; return EdgeSitesOnline / 5f;
             }
             text = "";
             return 0;
         }
+
+        int EdgeSitesOnline => company.sims.Count(x => x.racks.Values.Any(i => i.online));
 
         float BlackoutUptime()
         {
@@ -1389,6 +1472,9 @@ namespace DCT
                 case "aiboom": won = OnlineCustomerGpus >= 96; break;
                 case "blackout": won = S.contractsCompleted >= 15 && BlackoutUptime() >= 99.9f; break;
                 case "green": won = S.lastSolarShare >= 0.4f && MonthlyRevenue >= 100000; break;
+                case "coldnorth": won = S.heatSoldTotal >= 250000; break;
+                case "turnaround": won = S.loans.Count == 0 && S.reports.Count > 0 && S.reports.Any(r => r.Operating >= 250000); break;
+                case "edge": won = EdgeSitesOnline >= 5; break;
             }
             if (won)
             {
@@ -1429,6 +1515,17 @@ namespace DCT
             new AchievementDef { id = "multinational", name = "Multinational", desc = "Operate data centers in 3 cities." },
             new AchievementDef { id = "geo", name = "Across the Map", desc = "Bring a geo-redundant contract online." },
             new AchievementDef { id = "flood", name = "High and Dry", desc = "Ride out a flood thanks to raised floors." },
+            new AchievementDef { id = "zero_debt", name = "Debt Free", desc = "Pay off a loan in full." },
+            new AchievementDef { id = "insured", name = "Covered", desc = "Have an insurance claim paid out." },
+            new AchievementDef { id = "pue12", name = "Efficiency Expert", desc = "Run a month at a PUE under 1.2 with at least 50 kW of IT load." },
+            new AchievementDef { id = "mentor", name = "Mentor", desc = "Grow an employee to skill 5." },
+            new AchievementDef { id = "spot", name = "Spot Trader", desc = "Earn $100,000 on the spot compute market." },
+            new AchievementDef { id = "warm", name = "Warm Hearts", desc = "Sell $50,000 of waste heat to the city." },
+            new AchievementDef { id = "certified", name = "Certified", desc = "Pass a compliance audit." },
+            new AchievementDef { id = "rfp", name = "Winning Bid", desc = "Win a competitive tender." },
+            new AchievementDef { id = "anchor", name = "Anchor Tenant", desc = "Bring a hyperscale anchor tenant online." },
+            new AchievementDef { id = "takeover", name = "Hostile Takeover", desc = "Acquire a rival." },
+            new AchievementDef { id = "neighbour", name = "Good Neighbour", desc = "Go a full year without a noise complaint while running generators." },
         };
 
         public void Unlock(string id)
@@ -1466,10 +1563,15 @@ namespace DCT
             if (Racks.Count(r => AirflowFactor(r, out _) < 1f) >= 20) Unlock("cool_rows");
             if (S.ipo) Unlock("ipo");
             if (S.floodsSurvived > 0) Unlock("flood");
+            if (S.heatSoldTotal >= 50000) Unlock("warm");
+            if (S.contracts.Any(c => c.anchor && c.status == ContractStatus.Active && c.meeting)) Unlock("anchor");
+            if (S.Day >= 360 && S.sites.Any(site => site.objects.Any(o => Catalog.Facility(o.def)?.kind == FacilityKind.Generator)) &&
+                (S.lastComplaintHour < 0 || S.hour - S.lastComplaintHour >= 360 * Catalog.HoursPerDay)) Unlock("neighbour");
             S.peakMonthlyRevenue = Mathf.Max(S.peakMonthlyRevenue, MonthlyRevenue);
         }
 
-        public int Score => Mathf.RoundToInt(S.lifetimeRevenue / 1000f + S.contractsCompleted * 100 + S.Level * 500 + S.achievements.Count * 250 - S.contractsFailed * 150 + (S.ipo ? 10000 : 0));
+        public int Score => Mathf.RoundToInt(S.lifetimeRevenue / 1000f + S.contractsCompleted * 100 + S.Level * 500 + S.achievements.Count * 250 - S.contractsFailed * 150 + (S.ipo ? 10000 : 0)
+                                            + S.rfpsWon * 300 + S.rivalsAcquired * 1000 + S.quartersMet * 500);
 
         public bool CanIpo(out string why)
         {
@@ -1484,6 +1586,7 @@ namespace DCT
         {
             if (!CanIpo(out _)) return;
             S.ipo = true;
+            ListShares();
             float raise = Mathf.Round(MonthlyRevenue * 12f / 100000f) * 100000f;
             S.money += raise;
             S.current.bonuses += raise;
@@ -1492,7 +1595,7 @@ namespace DCT
         }
 
         // ================================================================ sandbox tools
-        public static readonly string[] SandboxEvents = { "outage", "heatwave", "powerspike", "fibercut", "surge", "recall", "fire", "leak", "ddos", "shortage", "bankrupt", "regulation", "pricewar", "breakin", "flood", "expansion", "grant", "press" };
+        public static readonly string[] SandboxEvents = { "outage", "heatwave", "powerspike", "fibercut", "surge", "recall", "fire", "leak", "ddos", "shortage", "bankrupt", "regulation", "pricewar", "breakin", "flood", "drought", "expansion", "grant", "press", "efficiency" };
 
         public void SandboxAddMoney(float amount) { S.money += amount; Log($"Sandbox: added ${amount:N0}.", 0); }
 
@@ -1555,7 +1658,7 @@ namespace DCT
         // ================================================================ daily & monthly extras
         bool outageHadDowntime;
 
-        static readonly HashSet<string> CompanyEvents = new HashSet<string> { "shortage", "pricewar", "bankrupt", "expansion", "grant", "press" };
+        static readonly HashSet<string> CompanyEvents = new HashSet<string> { "shortage", "pricewar", "bankrupt", "expansion", "grant", "press", "efficiency" };
 
         /// <summary>Local events hit a random site; company-wide events run here.</summary>
         void TriggerOnSite(string type)
@@ -1590,6 +1693,15 @@ namespace DCT
             S.monthSolarKWh += Mathf.Min(loadKW, solarKW);
             S.monthGridKWh += gridKWh;
             AgeHardware();
+            HourOps();
+        }
+
+        /// <summary>Per-site daily: staff growth, noise complaints and maintenance scheduling.</summary>
+        void DailySite()
+        {
+            DailyStaffGrowth();
+            DailyNoise();
+            AutoScheduleMaintenance();
         }
 
         void OnEventEnded(ActiveEvent e)
@@ -1605,6 +1717,12 @@ namespace DCT
         {
             DailyTickets();
             DailyRivals();
+            DailySpotPrices();
+            DailySatHistory();
+            MaybeNewRfp();
+            MaybeNewAnchor();
+            MaybeNewRival();
+            ShareholdersDaily();
             if (S.Day % 7 == 0 || S.candidates.Count == 0) RefreshCandidates();
             S.dayStats.Add(new DayStat
             {
@@ -1616,6 +1734,9 @@ namespace DCT
                 solarKW = company.sims.Sum(x => x.solarCapKW),
                 uptime = S.contracts.Where(c => c.status == ContractStatus.Active).Select(c => c.service).DefaultIfEmpty(1f).Average() * 100f,
                 temp = company.sims.SelectMany(x => x.zones).Select(z => z.temp).DefaultIfEmpty(20f).Max(),
+                pue = company.sims.Sum(x => x.itLoadKW) > 0.01f ? company.sims.Sum(x => x.loadKW) / company.sims.Sum(x => x.itLoadKW) : 0f,
+                sales = (company.sims.Sum(x => x.spotRevenueHour) + company.sims.Sum(x => x.heatRevenueHour)) * 24f,
+                share = S.ipo ? S.sharePrice : 0f,
             });
             if (S.dayStats.Count > 180) S.dayStats.RemoveAt(0);
             CheckAchievements();

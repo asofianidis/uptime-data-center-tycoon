@@ -73,6 +73,9 @@ namespace DCT
             if (c.disasterRate < 0.7f) notes.Add("the grid is famously stable");
             if (c.demandFactor > 1.12f) notes.Add("a booming tech scene pays well");
             if (c.demandFactor < 0.92f) notes.Add("customers are price-sensitive");
+            Simulation.EnsureCityV3(c);
+            if (c.climate == "Desert") notes.Add("water is scarce and dear");
+            if (c.heatPrice >= 0.06f) notes.Add("the district heating network buys waste heat");
             c.blurb = notes.Count == 0 ? "An unremarkable, balanced market." : char.ToUpper(notes[0][0]) + notes[0].Substring(1) + (notes.Count > 1 ? ", " + string.Join(", ", notes.GetRange(1, notes.Count - 1)) : "") + ".";
             return c;
         }
@@ -146,6 +149,12 @@ namespace DCT
                 case "Referral": return "Referred by a happy customer; pays 12% more.";
                 case "Geo-redundant": return "Needs online racks in at least two of your sites; pays 25% more.";
                 case "Redundant": return "Every rack needs dual PDU, two ToR switches and two core uplinks; pays 35% more.";
+                case "Compliance": return "Regulated customer: every rack must be in a site with a valid compliance certificate (Sites > Compliance); pays 30% more.";
+                case "Caged": return "Wants their racks inside one private cage (Rooms & Infra > Cage) with no other customer's racks; pays 15% more.";
+                case "Efficient": return "Wants a monthly PUE of 1.35 or better: right-size your cooling and keep halls busy; pays 10% more.";
+                case "Anchor": return "Hyperscale anchor tenant: a dedicated hall, ramping from 40% to 100% over six months.";
+                case "RFP": return "Won through a competitive tender.";
+                case "Acquired": return "Came with a rival you acquired.";
             }
             return t;
         }
@@ -257,6 +266,25 @@ namespace DCT
                 c.redundant = true;
                 c.traits.Add("Redundant");
                 traitMul *= 1.35f;
+            }
+            bool regulated = ind.name == "Finance" || ind.name == "Healthcare" || ind.name == "Government";
+            if (regulated && level >= 3 && Chance(r, 0.35))
+            {
+                c.compliance = true;
+                c.traits.Add("Compliance");
+                traitMul *= 1.3f;
+            }
+            if (c.type == ContractType.Colocation && level >= 2 && Chance(r, 0.3))
+            {
+                c.caged = true;
+                c.traits.Add("Caged");
+                traitMul *= 1.15f;
+            }
+            if (level >= 4 && !c.traits.Contains("Eco") && Chance(r, 0.12))
+            {
+                c.efficient = true;
+                c.traits.Add("Efficient");
+                traitMul *= 1.1f;
             }
             if (s.sites.Count >= 2 && level >= 4 && Chance(r, 0.2))
             {

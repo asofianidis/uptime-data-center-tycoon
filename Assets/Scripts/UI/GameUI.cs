@@ -323,7 +323,7 @@ namespace DCT
             TB(s, c, () => "Select  [Esc]", () => { gm.SetTool(Tool.Select); buildMenuOpen = roomMenuOpen = false; }, () => gm.tool == Tool.Select);
             TB(s, c, () => $"Foundation  [{Settings.KeyName("Foundation")}]", () => { gm.SetTool(Tool.Foundation); buildMenuOpen = roomMenuOpen = false; }, () => gm.tool == Tool.Foundation, "Foundation");
             TB(s, c, () => "Rooms & Infra", () => { roomMenuOpen = !roomMenuOpen; buildMenuOpen = false; if (roomMenuOpen) { gm.SetTool(Tool.Room); window = Window.None; } },
-                () => gm.tool == Tool.Room || gm.tool == Tool.Tray || gm.tool == Tool.Raised || roomMenuOpen, "Rooms");
+                () => gm.tool == Tool.Room || gm.tool == Tool.Tray || gm.tool == Tool.Raised || gm.tool == Tool.Cage || roomMenuOpen, "Rooms");
             TB(s, c, () => $"Equipment  [{Settings.KeyName("Equipment")}]", ToggleBuildMenu, () => buildMenuOpen || gm.tool == Tool.Place, "Equipment");
             TB(s, c, () => $"Demolish  [{Settings.KeyName("Demolish")}]", () => { gm.SetTool(Tool.Demolish); buildMenuOpen = roomMenuOpen = false; }, () => gm.tool == Tool.Demolish);
             K.Btn(s, c, () => $"Undo ({gm.UndoCount})  [Ctrl+{Settings.KeyName("Undo")}]", gm.Undo, () => gm.UndoCount > 0);
@@ -360,10 +360,10 @@ namespace DCT
             switch (tab)
             {
                 case 0: return d.kind == FacilityKind.Rack;
-                case 1: return d.kind == FacilityKind.Cooling || d.kind == FacilityKind.Suppression;
+                case 1: return d.kind == FacilityKind.Cooling || d.kind == FacilityKind.Suppression || d.kind == FacilityKind.HeatExchanger;
                 case 2: return d.kind == FacilityKind.CoreSwitch || d.kind == FacilityKind.Isp;
                 case 3: return d.kind == FacilityKind.Transformer || d.kind == FacilityKind.Switchgear || d.kind == FacilityKind.Ups || d.kind == FacilityKind.Generator || d.kind == FacilityKind.Solar || d.kind == FacilityKind.Battery;
-                default: return d.kind == FacilityKind.Desk || d.kind == FacilityKind.Elevator;
+                default: return d.kind == FacilityKind.Desk || d.kind == FacilityKind.Elevator || d.kind == FacilityKind.AccessControl || d.kind == FacilityKind.LoadingDock || d.kind == FacilityKind.SoundWall;
             }
         }
 
@@ -431,8 +431,10 @@ namespace DCT
             K.Text(p, "INFRASTRUCTURE", "section-title");
             K.Btn(s, p, () => $"Cable Trays (${Simulation.TrayCost:0}/tile)", () => gm.SetTool(Tool.Tray), null, () => gm.tool == Tool.Tray);
             K.Btn(s, p, () => $"Raised Floor (${Simulation.RaisedCost:0}/tile)", () => gm.SetTool(Tool.Raised), null, () => gm.tool == Tool.Raised);
+            K.Btn(s, p, () => $"Private Cage (${Simulation.CageCost:0}/tile)", () => gm.SetTool(Tool.Cage), null, () => gm.tool == Tool.Cage);
             if (gm.tool == Tool.Tray) K.Text(p, $"Overhead trays halve cabling cost, keep airflow clean, and are required for runs longer than {Simulation.MaxLooseCable} tiles. Cross-floor runs go through an Elevator & Cable Riser.", "dim");
             if (gm.tool == Tool.Raised) K.Text(p, "Raised floors in server halls protect against floods (ground floor) and add up to +10% cooling.", "dim");
+            if (gm.tool == Tool.Cage) K.Text(p, "A mesh fence inside a server hall. Each connected area is one cage; 'Caged' colocation customers need all their racks in one cage with nobody else's.", "dim");
             K.Text(p, "FLOORS", "section-title");
             K.Text(p, $"Viewing {(S.floor == 0 ? "the ground floor" : $"floor {S.floor + 1}")}. Use the arrows in the top bar or [{Settings.KeyName("FloorUp")}]/[{Settings.KeyName("FloorDown")}]. Upper floors need a slab ({K.Money(Catalog.UpperFloorCost)}/tile) built over the storey below.", "dim");
         }
