@@ -213,7 +213,7 @@ namespace DCT
     [Serializable]
     public class GameState
     {
-        public int version = 1;
+        public int version = 2;
         public int seed;
         public string difficulty = "Normal";
         public float money;

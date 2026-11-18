@@ -96,6 +96,17 @@ namespace DCT
         {
             S = state;
             state.EnsureSites();
+            if (state.version < 2)
+            {
+                // Saves from before income was scaled up: bring existing deals in line with new ones.
+                foreach (var c in state.contracts.Concat(state.offers))
+                {
+                    c.monthlyPay *= ProcGen.IncomeScale;
+                    c.signingBonus *= ProcGen.IncomeScale;
+                }
+                foreach (var t in state.tickets) t.fee *= ProcGen.IncomeScale;
+                state.version = 2;
+            }
             company = new Company(state);
             siteIndex = Mathf.Clamp(state.activeSite, 0, state.sites.Count - 1);
             for (int i = 0; i < state.sites.Count; i++) company.sims.Add(i == siteIndex ? this : null);
@@ -950,7 +961,7 @@ namespace DCT
                 }
                 case "grant":
                 {
-                    float amt = Mathf.Round(ProcGen.Range(rng, 5000, 20000) * (1 + S.Level * 0.5f) / 500f) * 500f;
+                    float amt = Mathf.Round(ProcGen.Range(rng, 5000, 20000) * (1 + S.Level * 0.5f) * ProcGen.IncomeScale / 500f) * 500f;
                     S.money += amt; S.current.bonuses += amt;
                     Log($"{S.city.name} awarded you a ${amt:N0} tech-investment grant!", 1);
                     break;

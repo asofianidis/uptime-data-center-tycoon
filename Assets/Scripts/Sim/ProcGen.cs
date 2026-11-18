@@ -7,6 +7,9 @@ namespace DCT
     /// <summary>All procedural generation: cities, lots, customers and contracts.</summary>
     public static class ProcGen
     {
+        /// <summary>Multiplier on everything the player earns: contract pay (and the signing bonuses derived from it), ticket fees and grants.</summary>
+        public const float IncomeScale = 10f;
+
         static readonly string[] Pre = { "Nim", "Kes", "Vor", "Ast", "Hal", "Zen", "Quan", "Bri", "Lum", "Cor", "Tel", "Ver", "Ox", "Sol", "Arc", "Nex", "Pyr", "Ion", "Del", "Mar", "Syl", "Tor", "Cy", "Eli", "Nov", "Kai", "Rho", "Vel", "Gal", "Hex", "Opt", "Ze", "Mor", "Fin", "Lyr" };
         static readonly string[] Mid = { "a", "o", "i", "e", "ar", "en", "ix", "", "", "", "u", "on" };
         static readonly string[] Suf = { "tek", "ra", "lytics", "sys", "ion", "ware", "tron", "core", "link", "nova", "grid", "flow", "path", "stack", "vault", "byte", "logic", "mind", "scale", "forge", "ly", "io", "wave", "shift", "loop" };
@@ -266,7 +269,7 @@ namespace DCT
             float ratingMul = 0.8f + s.rating / 250f;
             pay *= slaMul * traitMul * ratingMul * s.city.demandFactor * Range(r, 0.85f, 1.2f);
             pay += c.reqBandwidth * 120f;
-            c.monthlyPay = Mathf.Round(pay / 50f) * 50f;
+            c.monthlyPay = Mathf.Round(pay * IncomeScale / 50f) * 50f;
             c.signingBonus = Mathf.Round(c.monthlyPay * Range(r, 0.2f, 0.7f) / 50f) * 50f;
             c.expiresHour = s.hour + Catalog.HoursPerDay * r.Next(5, 13);
             c.flavor = $"{c.customer} is a {ind.noun} looking for {Describe(c).ToLower()}.";

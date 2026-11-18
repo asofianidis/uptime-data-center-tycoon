@@ -997,7 +997,7 @@ namespace DCT
                     text = ProcGen.Pick(rng, TicketTexts),
                     createdHour = S.hour,
                     deadlineHour = S.hour + rng.Next(18, 60),
-                    fee = Mathf.Round(ProcGen.Range(rng, 150, 700) * (1 + S.Level * 0.3f) / 10f) * 10f,
+                    fee = Mathf.Round(ProcGen.Range(rng, 150, 700) * (1 + S.Level * 0.3f) * ProcGen.IncomeScale / 10f) * 10f,
                     work = rng.Next(1, 5),
                     rackId = rackIds[rng.Next(rackIds.Count)],
                 };
