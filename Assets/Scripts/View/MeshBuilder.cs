@@ -93,8 +93,6 @@ namespace DCT
         {
             if (modelCache.TryGetValue(prefab, out var parts)) return parts;
             parts = new List<ModelParts>();
-            var root = prefab.transform;
-            var rootScale = Matrix4x4.Scale(root.localScale);
             foreach (var mf in prefab.GetComponentsInChildren<MeshFilter>(true))
             {
                 var mesh = mf.sharedMesh;
@@ -102,7 +100,8 @@ namespace DCT
                 var mats = mf.GetComponent<MeshRenderer>()?.sharedMaterials ?? new Material[0];
                 var p = new ModelParts
                 {
-                    local = rootScale * root.worldToLocalMatrix * mf.transform.localToWorldMatrix,
+                    // Keep the root's own offset: Blender exports joined models with the pivot wherever the first part was.
+                    local = mf.transform.localToWorldMatrix,
                     verts = mesh.vertices,
                     normals = mesh.normals,
                     tris = new int[mesh.subMeshCount][],
