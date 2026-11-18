@@ -157,7 +157,8 @@ namespace DCT
             s.city.carbonTax = r.NextDouble() < 0.4 ? (float)Math.Round(ProcGen.Range(r, 0.005f, 0.03f), 3) : 0f;
             s.city.solarFactor = s.city.climate == "Desert" ? 1.3f : s.city.climate == "Hot" ? 1.15f : s.city.climate == "Arctic" ? 0.6f : s.city.climate == "Cold" ? 0.8f : 1f;
             ApplyScenario(s);
-            for (int i = 0; i < 3; i++) s.offers.Add(ProcGen.GenerateContract(s, r));
+            // The opening offers give extra setup time: the lot is still empty.
+            for (int i = 0; i < 3; i++) { var o = ProcGen.GenerateContract(s, r); o.setupDays += 10; s.offers.Add(o); }
             s.current.month = 0;
             s.log.Add(new LogEntry { hour = s.hour, text = $"Welcome to {s.city.name}! {s.city.blurb}", severity = 1 });
             return s;
@@ -669,6 +670,16 @@ namespace DCT
                         Log($"{c.customer} is live! Signing bonus ${c.signingBonus:N0} received.", 1);
                         MarkContractRacks(c);
                     }
+                    else if (S.hour >= c.deadlineHour && !c.extended)
+                    {
+                        // First miss: the customer grudgingly waits a bit longer instead of walking away.
+                        int extraDays = Mathf.Max(3, c.setupDays / 2);
+                        c.extended = true;
+                        c.deadlineHour = S.hour + extraDays * Catalog.HoursPerDay;
+                        c.satisfaction = Mathf.Max(0, c.satisfaction - 10);
+                        Log($"{c.customer} is still waiting for their racks. They extended the setup deadline by {extraDays} days - this is the last extension.", 3);
+                        popups.Enqueue(new Popup { title = "Setup deadline extended", body = $"{c.customer}'s racks aren't ready yet{(string.IsNullOrEmpty(c.lastIssue) ? "" : $" ({c.lastIssue})")}. They've given you {extraDays} more days. If the deadline passes again they will cancel, charge a penalty and hurt your reputation." }.Add("OK", null));
+                    }
                     else if (S.hour >= c.deadlineHour)
                     {
                         float penalty = Mathf.Round(c.monthlyPay * 0.5f);
@@ -709,21 +720,32 @@ namespace DCT
             return h <= 0 ? 100f : 100f * (1f - d / h);
         }
 
+        /// <summary>
+        /// Hours of downtime a contract tolerates per month before the SLA is breached. The sim
+        /// runs in whole hours and any repair takes several, so the literal percentage (0.7h for
+        /// 99.9%) would make every single failure a breach; each tier gets a workable budget instead.
+        /// </summary>
+        public static float DowntimeBudget(Contract c) =>
+            c.sla >= 99.99f ? 2f : c.sla >= 99.9f ? 5f : c.sla >= 99.5f ? 8f : 12f;
+
         void MonthEnd(Contract c)
         {
-            float uptime = Uptime(c, true);
+            float down = c.monthDown;
+            float budget = DowntimeBudget(c);
             c.monthsServed++;
             c.nextMonthHour += Catalog.HoursPerMonth;
-            if (uptime + 0.0001f < c.sla)
+            if (down > budget + 0.0001f)
             {
-                float credit = Mathf.Round(c.monthlyPay * (uptime < c.sla - 1f ? 0.5f : 0.25f));
+                bool major = down > budget * 2f;
+                float credit = Mathf.Round(c.monthlyPay * (major ? 0.5f : 0.25f));
                 S.money -= credit;
                 S.current.penalties += credit;
-                S.rating = Mathf.Max(0, S.rating - 3);
-                c.satisfaction = Mathf.Max(0, c.satisfaction - 12);
+                // A near miss costs a little reputation, a real outage costs more.
+                S.rating = Mathf.Max(0, S.rating - (major ? 3f : 1f));
+                c.satisfaction = Mathf.Max(0, c.satisfaction - (major ? 12 : 6));
                 c.breaches++;
                 int maxBreaches = c.traits.Contains("Strict") ? 2 : 3;
-                Log($"SLA breach for {c.customer}: {uptime:0.00}% uptime vs {c.sla}% SLA. ${credit:N0} service credit.", 3);
+                Log($"SLA breach for {c.customer}: {down:0.0}h downtime vs {budget:0}h allowed ({c.sla}% SLA). ${credit:N0} service credit.", 3);
                 if (c.breaches >= maxBreaches)
                 {
                     S.rating = Mathf.Max(0, S.rating - 8);
@@ -752,7 +774,7 @@ namespace DCT
                 Log($"Contract with {c.customer} completed successfully! (+reputation)", 1);
                 float overall = Uptime(c, false);
                 if (c.satisfaction > 75) GenerateReferral(c);
-                if (overall >= c.sla - 0.5f && rng.NextDouble() < 0.2 + c.satisfaction / 125f)
+                if (c.totalDown <= DowntimeBudget(c) * Mathf.Max(1, c.monthsServed) && rng.NextDouble() < 0.2 + c.satisfaction / 125f)
                 {
                     int extra = rng.Next(4, 10);
                     float newPay = Mathf.Round(c.monthlyPay * ProcGen.Range(rng, 1.05f, 1.2f) / 50f) * 50f;

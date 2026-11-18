@@ -258,10 +258,9 @@ namespace DCT
                 {
                     int racks = Sim.company.AllRacks().Count(x => x.rack.contractId == con.id);
                     if (con.status == ContractStatus.Setup) return $"SETTING UP - deadline in {HoursToText(con.deadlineHour - S.hour)}. Goes live automatically once requirements are met.   {racks} rack(s) assigned";
-                    float mu = Sim.Uptime(con, true);
-                    return $"Month {con.monthsServed + 1}/{con.months}   This month uptime {mu:0.000}% (SLA {con.sla}%)   Overall {Sim.Uptime(con, false):0.00}%   Breaches {con.breaches}/{(con.traits.Contains("Strict") ? 2 : 3)}   Earned {K.Money(con.earned)}   {racks} rack(s) assigned";
+                    return $"Month {con.monthsServed + 1}/{con.months}   Downtime this month {con.monthDown:0.0}h of {Simulation.DowntimeBudget(con):0}h allowed (SLA {con.sla}%)   Overall {Sim.Uptime(con, false):0.00}%   Breaches {con.breaches}/{(con.traits.Contains("Strict") ? 2 : 3)}   Earned {K.Money(con.earned)}   {racks} rack(s) assigned";
                 }, "small", "wrap");
-                K.DynClass(s, st, () => con.status == ContractStatus.Setup ? "warn" : Sim.Uptime(con, true) < con.sla ? "bad" : null);
+                K.DynClass(s, st, () => con.status == ContractStatus.Setup ? "warn" : con.monthDown > Simulation.DowntimeBudget(con) ? "bad" : con.monthDown > Simulation.DowntimeBudget(con) * 0.6f ? "warn" : null);
                 var prob = K.Text(s, card, () => !string.IsNullOrEmpty(con.lastIssue) && !con.meeting ? "Problem: " + con.lastIssue : "", "small", "bad");
                 K.Show(s, prob, () => prob.text.Length > 0);
                 K.Small(s, act, () => $"Assign {gm.selection.Count(o => Catalog.Facility(o.def).kind == FacilityKind.Rack)} selected rack(s)", () =>

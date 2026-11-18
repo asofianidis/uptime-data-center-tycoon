@@ -987,6 +987,8 @@ namespace DCT
         {
             foreach (var c in S.contracts.Where(x => x.status == ContractStatus.Active).ToList())
             {
+                // Customers settle in for a few days before filing tickets.
+                if (c.totalHours < 5 * Catalog.HoursPerDay) continue;
                 if (rng.NextDouble() > 0.14) continue;
                 var rackIds = company.AllRacks().Where(x => x.rack.contractId == c.id).Select(x => x.rack.id).ToList();
                 if (rackIds.Count == 0) continue;
@@ -996,7 +998,7 @@ namespace DCT
                     contractId = c.id,
                     text = ProcGen.Pick(rng, TicketTexts),
                     createdHour = S.hour,
-                    deadlineHour = S.hour + rng.Next(18, 60),
+                    deadlineHour = S.hour + rng.Next(30, 72),
                     fee = Mathf.Round(ProcGen.Range(rng, 150, 700) * (1 + S.Level * 0.3f) * ProcGen.IncomeScale / 10f) * 10f,
                     work = rng.Next(1, 5),
                     rackId = rackIds[rng.Next(rackIds.Count)],

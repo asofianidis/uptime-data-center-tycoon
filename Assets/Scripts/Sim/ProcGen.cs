@@ -227,7 +227,7 @@ namespace DCT
             else { c.sla = 99.99f; slaMul = 1.42f; }
 
             c.months = r.Next(3, 9) + level / 2;
-            c.setupDays = r.Next(7, 15);
+            c.setupDays = r.Next(10, 18);
 
             // Traits
             int traitCount = r.NextDouble() < 0.45 ? 0 : (r.NextDouble() < 0.75 ? 1 : 2);
@@ -242,7 +242,7 @@ namespace DCT
                 c.traits.Add(t);
                 switch (t)
                 {
-                    case "Rush": c.setupDays = r.Next(3, 5); traitMul *= 1.25f; break;
+                    case "Rush": c.setupDays = r.Next(5, 8); traitMul *= 1.25f; break;
                     case "Budget": traitMul *= 0.85f; if (c.sla > 99.0f) { c.sla = c.sla >= 99.9f ? 99.5f : 99.0f; } break;
                     case "Premium": traitMul *= 1.2f; if (c.sla < 99.9f) c.sla = 99.9f; break;
                     case "Long-term": c.months *= 2; traitMul *= 0.95f; break;

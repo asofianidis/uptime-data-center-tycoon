@@ -113,6 +113,7 @@ namespace DCT
         public bool meeting;
         public float service = 1f;
         public bool expanded;
+        public bool extended;           // customer already granted one setup-deadline extension
         public bool isRenewal;
         public float earned;
         public string lastIssue;

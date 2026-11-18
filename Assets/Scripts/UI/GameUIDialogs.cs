@@ -399,7 +399,7 @@ NETWORK
 Each rack needs a ToR switch and a cable to a Core Switch in a Network Room. Runs longer than 14 tiles need cable trays. Total customer bandwidth must fit within your ISP uplinks.
 
 CONTRACTS
-Accept offers in the Market, assign racks, and provision hardware until the requirement bars fill. Uptime is checked monthly against the SLA. Redundant contracts need dual PDU, two ToR switches and two core uplinks; geo-redundant contracts need racks in two sites. Resolve support tickets to keep customers happy.
+Accept offers in the Market, assign racks, and provision hardware until the requirement bars fill. Each SLA tier allows a monthly downtime budget (99%: 12h, 99.5%: 8h, 99.9%: 5h, 99.99%: 2h); going over it is a breach. Setup deadlines get one extension before the customer walks away. Redundant contracts need dual PDU, two ToR switches and two core uplinks; geo-redundant contracts need racks in two sites. Resolve support tickets to keep customers happy.
 
 STAFF
 Hire technicians, electricians, network engineers and security on day or night shifts. Each desk seats one person per shift. Staff walk to jobs, so keep aisles clear.
