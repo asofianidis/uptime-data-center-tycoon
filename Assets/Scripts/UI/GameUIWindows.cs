@@ -301,7 +301,7 @@ namespace DCT
                     var desc = K.Text(row, it.desc, "dim");
                     desc.style.flexGrow = 1; desc.style.flexShrink = 1; desc.style.flexBasis = 0;
                     if (done) K.Text(row, "Unlocked", "small", "good");
-                    else K.Small(s, row, () => $"Research {K.Money(item.cost)}", () => Report(Sim.Research(item.id)), () => S.Level >= lvl && S.money >= item.cost).style.width = 150;
+                    else K.Small(s, row, () => $"Research {K.Money(item.cost)}", () => { Report(Sim.Research(item.id)); windowSection.Invalidate(); }, () => S.Level >= item.level && S.money >= item.cost).style.width = 150;
                 }
             }
         }
