@@ -220,7 +220,6 @@ namespace DCT
         public float money;
         public int hour;
         public int xp;
-        public float rating = 50f;
         public CityProfile city = new CityProfile();
 
         public int mapW = 64, mapH = 48;

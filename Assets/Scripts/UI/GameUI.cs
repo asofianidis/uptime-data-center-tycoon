@@ -276,9 +276,6 @@ namespace DCT
             xp.style.width = 110;
             K.Bar(s, xp, () => { int lv = S.Level; if (lv >= Catalog.MaxLevel) return 1f; int a = Catalog.XpForLevel(lv), b = Catalog.XpForLevel(lv + 1); return (S.xp - a) / (float)Mathf.Max(1, b - a); },
                 () => new Color(0.6f, 0.4f, 1f), () => { int lv = S.Level; if (lv >= Catalog.MaxLevel) return "MAX"; int a = Catalog.XpForLevel(lv), b = Catalog.XpForLevel(lv + 1); return $"{S.xp - a}/{b - a} XP"; });
-            var rep = K.Text(s, r, () => $"Rep {S.rating:0}");
-            rep.style.marginLeft = 8;
-            K.DynClass(s, rep, () => S.rating >= 60 ? "good" : S.rating >= 35 ? null : "bad");
 
             Stat(s, r, "Power", () => $"{Sim.loadKW:0}/{Sim.availableKW:0} kW", () => Sim.powerShort ? 2 : Sim.loadKW > Sim.availableKW * 0.85f ? 1 : 0);
             Stat(s, r, "Hot", () => Sim.zones.Count > 0 ? $"{Sim.zones.Max(z => z.temp):0.0}C" : "-", () => { float t = Sim.zones.Count > 0 ? Sim.zones.Max(z => z.temp) : 0; return t > 35 ? 2 : t > 29 ? 1 : 0; });
@@ -656,7 +653,7 @@ namespace DCT
                 var dd = d;
                 K.Btn(s, drow, () => dd, () => difficulty = dd, null, () => difficulty == dd).style.width = 100;
             }
-            K.Text(s, p, () => difficulty == "Easy" ? "More starting cash, fewer hardware failures." : difficulty == "Hard" ? "Tight budget, low starting reputation, frequent failures." : "The intended experience.", "dim");
+            K.Text(s, p, () => difficulty == "Easy" ? "More starting cash, fewer hardware failures." : difficulty == "Hard" ? "Tight budget, frequent failures." : "The intended experience.", "dim");
 
             var city = K.Card(p);
             CityProfile Preview() => ProcGen.GenerateCity(new System.Random(int.TryParse(seedText, out int sv) ? sv : 0));

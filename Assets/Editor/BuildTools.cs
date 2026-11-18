@@ -216,7 +216,7 @@ namespace DCT.EditorTools
                             }
                             minMoney = Mathf.Min(minMoney, s.money);
                             if (d % 90 == 89)
-                                sb.AppendLine($"  seed {seed} {diff} day {d + 1}: ${s.money:N0} lvl {s.Level} xp {s.xp} rep {s.rating:0} racks {sim.Racks.Count()} servers {s.objects.Sum(o => o.devices.Count)} active {s.contracts.Count(c => c.status == ContractStatus.Active)} done {s.contractsCompleted} failed {s.contractsFailed} load {sim.loadKW:0}kW staff {s.staff.Count}/{sim.deskCount} [{string.Join(",", s.staff.Select(m => m.state[0]))}] failedDev {s.objects.Sum(o => o.devices.Count(x => x.failed))} failedFac {s.objects.Count(o => o.failed)} pdu {s.objects.Count(o => o.pduTripped)} tickets {s.tickets.Count} done {s.ticketsDone} miss {s.ticketsMissed}");
+                                sb.AppendLine($"  seed {seed} {diff} day {d + 1}: ${s.money:N0} lvl {s.Level} xp {s.xp} racks {sim.Racks.Count()} servers {s.objects.Sum(o => o.devices.Count)} active {s.contracts.Count(c => c.status == ContractStatus.Active)} done {s.contractsCompleted} failed {s.contractsFailed} load {sim.loadKW:0}kW staff {s.staff.Count}/{sim.deskCount} [{string.Join(",", s.staff.Select(m => m.state[0]))}] failedDev {s.objects.Sum(o => o.devices.Count(x => x.failed))} failedFac {s.objects.Count(o => o.failed)} pdu {s.objects.Count(o => o.pduTripped)} tickets {s.tickets.Count} done {s.ticketsDone} miss {s.ticketsMissed}");
                         }
                         var sw = System.Diagnostics.Stopwatch.StartNew();
                         for (int h = 0; h < 48; h++) sim.TickHour();

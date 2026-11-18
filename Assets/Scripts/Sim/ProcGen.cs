@@ -266,8 +266,7 @@ namespace DCT
             }
             foreach (var e in s.events) if (e.type == "pricewar") traitMul *= e.magnitude;
             c.reqBandwidth = Mathf.Max(0.5f, Mathf.Round(c.reqBandwidth * 2f) / 2f);
-            float ratingMul = 0.8f + s.rating / 250f;
-            pay *= slaMul * traitMul * ratingMul * s.city.demandFactor * Range(r, 0.85f, 1.2f);
+            pay *= slaMul * traitMul * s.city.demandFactor * Range(r, 0.85f, 1.2f);
             pay += c.reqBandwidth * 120f;
             c.monthlyPay = Mathf.Round(pay * IncomeScale / 50f) * 50f;
             c.signingBonus = Mathf.Round(c.monthlyPay * Range(r, 0.2f, 0.7f) / 50f) * 50f;

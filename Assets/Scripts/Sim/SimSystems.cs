@@ -1107,7 +1107,6 @@ namespace DCT
                 {
                     var rv = S.rivals[rng.Next(S.rivals.Count)];
                     rv.customers++;
-                    S.rating = Mathf.Max(0, S.rating - 3);
                     S.contractsFailed++;
                     EndContract(c, ContractStatus.Cancelled);
                     Log($"Unhappy with your service, {c.customer} moved to {rv.name}!", 3);
@@ -1129,7 +1128,7 @@ namespace DCT
             if (c.negotiated) return "You already negotiated this offer.";
             c.negotiated = true;
             var ind = c.industry;
-            float bias = S.rating / 200f;
+            const float bias = 0.25f;
             switch (ask)
             {
                 case "pay":
@@ -1242,7 +1241,7 @@ namespace DCT
                     var c = active[rng.Next(active.Count)];
                     EndContract(c, ContractStatus.Cancelled);
                     Log($"{c.customer} went bankrupt. Their contract ends immediately.", 3);
-                    popups.Enqueue(new Popup { title = "Customer bankrupt", body = $"{c.customer} has filed for bankruptcy and their contract is void. Their racks are free to re-use. This doesn't affect your reputation." }.Add("OK", null));
+                    popups.Enqueue(new Popup { title = "Customer bankrupt", body = $"{c.customer} has filed for bankruptcy and their contract is void. Their racks are free to re-use." }.Add("OK", null));
                     break;
                 }
                 case "regulation":
@@ -1310,7 +1309,7 @@ namespace DCT
         public static readonly List<ScenarioDef> Scenarios = new List<ScenarioDef>
         {
             new ScenarioDef { id = "sandbox", name = "Endless", desc = "Endless play on a random map with the normal economy.", goal = "No goal - build the biggest, most reliable data center you can.", days = 0 },
-            new ScenarioDef { id = "creative", name = "Sandbox", desc = "Creative mode: unlimited money, all technology unlocked, max reputation, and switches for failures, events and bankruptcy. Achievements are disabled.", goal = "No goal - experiment freely.", days = 0 },
+            new ScenarioDef { id = "creative", name = "Sandbox", desc = "Creative mode: unlimited money, all technology unlocked, max level, and switches for failures, events and bankruptcy. Achievements are disabled.", goal = "No goal - experiment freely.", days = 0 },
             new ScenarioDef { id = "desert", name = "Desert Heat", desc = "A scorching desert city where cooling is brutal.", goal = "Reach $150,000/month recurring revenue within 3 years.", days = 1080 },
             new ScenarioDef { id = "shoestring", name = "Shoestring", desc = "Start with only $110,000 - every dollar counts.", goal = "Reach reputation level 5 within 2 years.", days = 720 },
             new ScenarioDef { id = "aiboom", name = "AI Boom", desc = "Everyone wants GPUs. You start at level 5 with GPU servers researched.", goal = "Run 96 GPUs online for customers within 2 years.", days = 720 },
@@ -1331,7 +1330,6 @@ namespace DCT
                     s.money = 1_000_000_000f;
                     s.xp = Catalog.XpForLevel(Catalog.MaxLevel);
                     s.peakLevel = Catalog.MaxLevel;
-                    s.rating = 80;
                     foreach (var d in Catalog.Devices) if (d.research > 0) s.unlocked.Add(d.id);
                     foreach (var f in Catalog.Facilities) if (f.research > 0) s.unlocked.Add(f.id);
                     break;
@@ -1477,7 +1475,6 @@ namespace DCT
         {
             var gaps = new List<string>();
             if (MonthlyRevenue < 400000) gaps.Add($"${MonthlyRevenue:N0}/$400,000 monthly revenue");
-            if (S.rating < 75) gaps.Add($"rating {S.rating:0}/75");
             if (S.Level < 8) gaps.Add($"level {S.Level}/8");
             why = gaps.Count == 0 ? null : "Needs " + string.Join(", ", gaps);
             return gaps.Count == 0 && !S.ipo;

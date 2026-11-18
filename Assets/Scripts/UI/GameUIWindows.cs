@@ -140,7 +140,7 @@ namespace DCT
         // ---------------------------------------------------------------- market
         void MarketWindow(VisualElement p, Scope s)
         {
-            K.Text(s, p, () => $"Offers refresh over time. Better reputation brings more and better-paying customers. Reputation level {S.Level}, rating {S.rating:0}/100.", "dim");
+            K.Text(s, p, () => $"Offers refresh over time. Higher levels bring bigger, better-paying customers. Level {S.Level}.", "dim");
             var rv = K.Row(p, "card");
             K.Text(rv, "Competitors:", "dim").style.width = 90;
             foreach (var rival in S.rivals)
@@ -269,7 +269,7 @@ namespace DCT
                 }, () => gm.selection.Any(o => Catalog.Facility(o.def).kind == FacilityKind.Rack));
                 K.Small(s, act, () => gm.view.highlightContract == con.id ? "Stop highlight" : "Highlight racks", () => gm.view.highlightContract = gm.view.highlightContract == con.id ? -1 : con.id);
                 K.Small(act, "Select racks", () => { gm.selection.Clear(); gm.selection.AddRange(Sim.Racks.Where(o => o.contractId == con.id)); });
-                K.Small(act, $"Cancel ({K.Money(Sim.CancelPenalty(c))})", () => Confirm($"Cancel the contract with {con.customer}? You'll pay a {K.Money(Sim.CancelPenalty(con))} early termination fee and lose reputation.", () => Sim.CancelContract(con)));
+                K.Small(act, $"Cancel ({K.Money(Sim.CancelPenalty(c))})", () => Confirm($"Cancel the contract with {con.customer}? You'll pay a {K.Money(Sim.CancelPenalty(con))} early termination fee.", () => Sim.CancelContract(con)));
             }
         }
 
@@ -652,10 +652,6 @@ namespace DCT
             K.Small(lv, "-1", () => Sim.SandboxSetLevel(S.Level - 1));
             K.Small(lv, "+1", () => Sim.SandboxSetLevel(S.Level + 1));
             K.Small(lv, "Max", () => Sim.SandboxSetLevel(Catalog.MaxLevel));
-            var rep = K.Row(c);
-            K.Text(s, rep, () => $"Rating {S.rating:0}").style.width = 160;
-            K.Small(rep, "-10", () => S.rating = Mathf.Max(0, S.rating - 10));
-            K.Small(rep, "+10", () => S.rating = Mathf.Min(100, S.rating + 10));
         }
 
         void SandboxWorld(VisualElement c)

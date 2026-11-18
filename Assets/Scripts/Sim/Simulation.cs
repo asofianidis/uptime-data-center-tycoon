@@ -150,7 +150,6 @@ namespace DCT
             s.city = ProcGen.GenerateCity(r);
             ProcGen.GenerateLot(s, r);
             s.money = difficulty == "Easy" ? 550000 : difficulty == "Hard" ? 200000 : 350000;
-            s.rating = difficulty == "Hard" ? 40 : 50;
             s.hour = 8;
             s.nextOfferHour = s.hour + 24;
             s.scenario = scenario ?? "sandbox";
@@ -678,14 +677,13 @@ namespace DCT
                         c.deadlineHour = S.hour + extraDays * Catalog.HoursPerDay;
                         c.satisfaction = Mathf.Max(0, c.satisfaction - 10);
                         Log($"{c.customer} is still waiting for their racks. They extended the setup deadline by {extraDays} days - this is the last extension.", 3);
-                        popups.Enqueue(new Popup { title = "Setup deadline extended", body = $"{c.customer}'s racks aren't ready yet{(string.IsNullOrEmpty(c.lastIssue) ? "" : $" ({c.lastIssue})")}. They've given you {extraDays} more days. If the deadline passes again they will cancel, charge a penalty and hurt your reputation." }.Add("OK", null));
+                        popups.Enqueue(new Popup { title = "Setup deadline extended", body = $"{c.customer}'s racks aren't ready yet{(string.IsNullOrEmpty(c.lastIssue) ? "" : $" ({c.lastIssue})")}. They've given you {extraDays} more days. If the deadline passes again they will cancel and charge a penalty." }.Add("OK", null));
                     }
                     else if (S.hour >= c.deadlineHour)
                     {
                         float penalty = Mathf.Round(c.monthlyPay * 0.5f);
                         S.money -= penalty;
                         S.current.penalties += penalty;
-                        S.rating = Mathf.Max(0, S.rating - 8);
                         S.contractsFailed++;
                         EndContract(c, ContractStatus.Cancelled);
                         Log($"Missed setup deadline for {c.customer}. Contract cancelled, ${penalty:N0} penalty.", 3);
@@ -740,25 +738,21 @@ namespace DCT
                 float credit = Mathf.Round(c.monthlyPay * (major ? 0.5f : 0.25f));
                 S.money -= credit;
                 S.current.penalties += credit;
-                // A near miss costs a little reputation, a real outage costs more.
-                S.rating = Mathf.Max(0, S.rating - (major ? 3f : 1f));
                 c.satisfaction = Mathf.Max(0, c.satisfaction - (major ? 12 : 6));
                 c.breaches++;
                 int maxBreaches = c.traits.Contains("Strict") ? 2 : 3;
                 Log($"SLA breach for {c.customer}: {down:0.0}h downtime vs {budget:0}h allowed ({c.sla}% SLA). ${credit:N0} service credit.", 3);
                 if (c.breaches >= maxBreaches)
                 {
-                    S.rating = Mathf.Max(0, S.rating - 8);
                     S.contractsFailed++;
                     EndContract(c, ContractStatus.Cancelled);
-                    popups.Enqueue(new Popup { title = "Contract terminated", body = $"{c.customer} has terminated their contract after {c.breaches} SLA breaches. Your reputation has suffered." }.Add("OK", null));
+                    popups.Enqueue(new Popup { title = "Contract terminated", body = $"{c.customer} has terminated their contract after {c.breaches} SLA breaches." }.Add("OK", null));
                     return;
                 }
             }
             else
             {
                 S.xp += MonthXp(c);
-                S.rating = Mathf.Min(100, S.rating + 1.2f);
                 c.satisfaction = Mathf.Min(100, c.satisfaction + 2);
             }
             EcoCheck(c);
@@ -767,11 +761,10 @@ namespace DCT
             if (c.monthsServed >= c.months)
             {
                 S.xp += MonthXp(c) * 3;
-                S.rating = Mathf.Min(100, S.rating + 3f);
                 S.contractsCompleted++;
                 var rackIds = company.AllRacks().Where(x => x.rack.contractId == c.id).Select(x => x.rack.id).ToList();
                 EndContract(c, ContractStatus.Completed);
-                Log($"Contract with {c.customer} completed successfully! (+reputation)", 1);
+                Log($"Contract with {c.customer} completed successfully!", 1);
                 float overall = Uptime(c, false);
                 if (c.satisfaction > 75) GenerateReferral(c);
                 if (c.totalDown <= DowntimeBudget(c) * Mathf.Max(1, c.monthsServed) && rng.NextDouble() < 0.2 + c.satisfaction / 125f)
@@ -852,7 +845,7 @@ namespace DCT
                     S.offers.Add(c);
                     Log($"New contract offer: {c.customer} wants {ProcGen.Describe(c).ToLower()}.", 0);
                 }
-                float speed = Mathf.Lerp(3.2f, 1.2f, S.rating / 100f);
+                const float speed = 2.2f;
                 S.nextOfferHour = S.hour + Mathf.RoundToInt(24 * speed * ProcGen.Range(rng, 0.6f, 1.4f));
             }
 
@@ -990,8 +983,8 @@ namespace DCT
                 }
                 case "press":
                 {
-                    S.rating = Mathf.Min(100, S.rating + 5);
-                    Log("A trade magazine praised your reliability. Reputation +5.", 1);
+                    foreach (var pc in S.contracts.Where(x => x.status == ContractStatus.Active)) pc.satisfaction = Mathf.Min(100, pc.satisfaction + 5);
+                    Log("A trade magazine praised your reliability. Customer satisfaction +5.", 1);
                     break;
                 }
                 case "expansion":
@@ -1446,7 +1439,6 @@ namespace DCT
             float pen = CancelPenalty(c);
             S.money -= pen;
             S.current.penalties += pen;
-            S.rating = Mathf.Max(0, S.rating - 6);
             S.contractsFailed++;
             EndContract(c, ContractStatus.Cancelled);
             Log($"You cancelled the contract with {c.customer}. ${pen:N0} early termination fee.", 3);
