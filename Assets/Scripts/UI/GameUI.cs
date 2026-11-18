@@ -36,7 +36,6 @@ namespace DCT
         float appliedScale = -1;
 
         bool buildMenuOpen, roomMenuOpen, showAllAssign, newGamePanel;
-        int buildTab, contractsTab, staffTab;
         string rebinding, confirmText, scenarioId = "sandbox", difficulty = "Normal", templateName = "My rack", tutorialHighlight;
         string seedText = "";
         Action confirmAction;
@@ -205,7 +204,7 @@ namespace DCT
             var side = K.Div(hudLayer);
             K.Abs(side, left: 184, top: 52);
             side.pickingMode = PickingMode.Ignore;
-            sideSection = new Section(side, () => $"{buildMenuOpen}|{roomMenuOpen}|{buildTab}|{S.Level}|{S.unlocked.Count}|{gm.tool}|{gm.roomType}|{(gm.placeDef != null ? gm.placeDef.id : "")}", BuildSideMenu);
+            sideSection = new Section(side, () => $"{buildMenuOpen}|{roomMenuOpen}|{S.Level}|{S.unlocked.Count}|{gm.tool}|{gm.roomType}|{(gm.placeDef != null ? gm.placeDef.id : "")}", BuildSideMenu);
             hudSections.Add(sideSection);
 
             // Management window
@@ -382,13 +381,7 @@ namespace DCT
             var p = K.Panel(r);
             p.style.width = 350;
             p.style.maxHeight = VH - 70;
-            var tabs = K.Row(p);
-            for (int i = 0; i < BuildTabs.Length; i++)
-            {
-                int idx = i;
-                var b = K.Small(tabs, BuildTabs[i], () => { buildTab = idx; });
-                b.EnableInClassList("on", buildTab == i);
-            }
+            int buildTab = Tabs(p, sideSection, "build", BuildTabs);
             var sv = K.Scroll(p);
             foreach (var d in Catalog.Facilities.Where(f => InTab(f, buildTab)))
             {

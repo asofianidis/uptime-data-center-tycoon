@@ -13,10 +13,10 @@ namespace DCT
             switch (window)
             {
                 case Window.Market: return $"m|{string.Join(",", S.offers.Select(o => o.id + (o.negotiated ? "n" : "") + o.monthlyPay))}|{S.rivals.Count}";
-                case Window.Contracts: return $"c|{contractsTab}|{string.Join(",", S.contracts.Select(c => c.id + c.status.ToString()))}|{string.Join(",", S.tickets.Select(t => t.id))}";
+                case Window.Contracts: return $"c|{string.Join(",", S.contracts.Select(c => c.id + c.status.ToString() + (c.meeting ? "m" : "") + (c.satisfaction < 40 ? "u" : "")))}|{string.Join(",", S.tickets.Select(t => t.id))}";
                 case Window.Research: return $"r|{S.unlocked.Count}|{S.Level}";
                 case Window.Finance: return $"f|{S.reports.Count}";
-                case Window.Staff: return $"s|{staffTab}|{S.activeSite}|{string.Join(",", S.staff.Select(m => m.id + m.shift))}|{string.Join(",", S.candidates.Select(c => c.name))}|{S.ownX0},{S.ownY0},{S.ownX1},{S.ownY1}";
+                case Window.Staff: return $"s|{S.activeSite}|{string.Join(",", S.staff.Select(m => m.id + m.shift))}|{string.Join(",", S.candidates.Select(c => c.name))}|{S.ownX0},{S.ownY0},{S.ownX1},{S.ownY1}";
                 case Window.Log: return $"l|{S.log.Count}|{(S.log.Count > 0 ? S.log[S.log.Count - 1].hour : 0)}";
                 case Window.Goals: return $"g|{S.achievements.Count}|{S.ipo}|{S.scenarioDone}";
                 case Window.Dashboard: return "d";
@@ -151,9 +151,15 @@ namespace DCT
             K.Text(s, rv, () => $"You: {Sim.YourCustomers} customers", "bold");
             if (S.events.Any(e => e.type == "pricewar")) K.Text(p, "A price war is on: new offers pay 15% less.", "warn");
 
+            var types = (ContractType[])Enum.GetValues(typeof(ContractType));
+            var labels = new List<string> { $"All ({S.offers.Count})" };
+            labels.AddRange(types.Select(t => $"{Catalog.TypeName(t)} ({S.offers.Count(o => o.type == t)})"));
+            int tab = Tabs(p, windowSection, "market", labels.ToArray());
+            var shown = S.offers.Where(o => tab == 0 || o.type == types[tab - 1]).ToList();
+
             var sv = K.Scroll(p);
-            if (S.offers.Count == 0) K.Text(sv.contentContainer, "No offers right now. New customers will call soon.", "dim");
-            foreach (var c in S.offers.ToList())
+            if (shown.Count == 0) K.Text(sv.contentContainer, S.offers.Count == 0 ? "No offers right now. New customers will call soon." : "No offers of this type right now.", "dim");
+            foreach (var c in shown)
             {
                 var con = c;
                 var card = K.Card(sv.contentContainer);
@@ -182,16 +188,20 @@ namespace DCT
         // ---------------------------------------------------------------- contracts
         void ContractsWindow(VisualElement p, Scope s)
         {
-            var tabs = K.Row(p);
-            K.Btn(s, tabs, () => "Active", () => contractsTab = 0, null, () => contractsTab == 0).style.width = 120;
-            K.Btn(s, tabs, () => "History", () => contractsTab = 1, null, () => contractsTab == 1).style.width = 120;
-            K.Flex(tabs);
-            K.Text(s, tabs, () => $"Completed {S.contractsCompleted}   Failed {S.contractsFailed}", "dim");
+            var setup = S.contracts.Where(x => x.status == ContractStatus.Setup).ToList();
+            var live = S.contracts.Where(x => x.status == ContractStatus.Active).ToList();
+            var past = S.contracts.Where(x => x.status == ContractStatus.Completed || x.status == ContractStatus.Cancelled).ToList();
+            // Live contracts that are short of requirements, have open tickets or an unhappy customer.
+            var attention = live.Where(x => !x.meeting || x.satisfaction < 40 || S.tickets.Any(t => t.contractId == x.id)).ToList();
+            int tab = Tabs(p, windowSection, "contracts", live.Count == 0 && setup.Count > 0 ? 2 : 0, out var bar,
+                $"Live ({live.Count})", $"Needs attention ({attention.Count})", $"Setting up ({setup.Count})", $"History ({past.Count})");
+            K.Text(s, bar, () => $"Completed {S.contractsCompleted}   Failed {S.contractsFailed}", "dim");
             var sv = K.Scroll(p);
             var c0 = sv.contentContainer;
-            if (contractsTab == 1)
+            if (tab == 3)
             {
-                foreach (var c in S.contracts.Where(x => x.status == ContractStatus.Completed || x.status == ContractStatus.Cancelled).Reverse())
+                if (past.Count == 0) K.Text(c0, "No finished contracts yet.", "dim");
+                foreach (var c in Enumerable.Reverse(past))
                 {
                     var row = K.Row(c0, "card");
                     K.Swatch(row, Catalog.CustomerColors[c.colorIdx]);
@@ -201,8 +211,8 @@ namespace DCT
                 }
                 return;
             }
-            var list = S.contracts.Where(x => x.status == ContractStatus.Setup || x.status == ContractStatus.Active).ToList();
-            if (list.Count == 0) K.Text(c0, "No active contracts. Visit the Market [M] to sign customers.", "dim");
+            var list = tab == 0 ? live : tab == 1 ? attention : setup;
+            if (list.Count == 0) K.Text(c0, tab == 0 ? (setup.Count > 0 ? "No live contracts yet - see Setting up." : "No active contracts. Visit the Market [M] to sign customers.") : tab == 1 ? "Every live contract is running fine." : "No contracts waiting to go live.", "dim");
             foreach (var c in list)
             {
                 var con = c;
@@ -267,15 +277,17 @@ namespace DCT
         void ResearchWindow(VisualElement p, Scope s)
         {
             K.Text(p, "Unlock new hardware with cash once your reputation level is high enough. Complete contracts reliably to gain reputation XP.", "dim");
+            // Tab 0 is rack hardware (servers & switches); the rest follow the equipment menu's categories.
+            // Each label counts the items that can be researched right now.
+            string Ready(int t) { int n = ResearchItems(t).Count(it => !Sim.IsUnlocked(it.id) && S.Level >= it.level); return n > 0 ? $" ({n})" : ""; }
+            var labels = new[] { "Servers & Switches" }.Concat(BuildTabs).Select((name, i) => name + Ready(i)).ToArray();
+            int tab = Tabs(p, windowSection, "research", labels);
             var sv = K.Scroll(p);
+            var all = ResearchItems(tab);
+            if (all.Count == 0) K.Text(sv.contentContainer, "Nothing to research in this category.", "dim");
             for (int lvl = 1; lvl <= Catalog.MaxLevel; lvl++)
             {
-                var items = new List<(string id, string name, string kind, string desc, float cost)>();
-                foreach (var d in Catalog.Devices.Where(x => x.level == lvl && x.research > 0))
-                    items.Add((d.id, d.name, d.kind == DeviceKind.Switch ? "Switch" : "Server",
-                        d.kind == DeviceKind.Switch ? $"{d.ports} ports, {d.uplinkGbps:0}G uplink" : $"{d.heightU}U, {d.cores} cores, {d.storageTB:0} TB{(d.gpus > 0 ? $", {d.gpus} GPU" : "")}, {d.watts:0} W", d.research));
-                foreach (var f in Catalog.Facilities.Where(x => x.level == lvl && x.research > 0))
-                    items.Add((f.id, f.name, Catalog.KindName(f.kind), f.desc, f.research));
+                var items = all.Where(x => x.level == lvl).ToList();
                 if (items.Count == 0) continue;
                 bool reached = S.Level >= lvl;
                 K.Text(sv.contentContainer, $"LEVEL {lvl}" + (reached ? "" : $"  (reach {Catalog.XpForLevel(lvl)} XP)"), "section-title");
@@ -294,9 +306,23 @@ namespace DCT
             }
         }
 
+        List<(string id, string name, string kind, string desc, float cost, int level)> ResearchItems(int tab)
+        {
+            var items = new List<(string id, string name, string kind, string desc, float cost, int level)>();
+            if (tab == 0)
+                foreach (var d in Catalog.Devices.Where(x => x.research > 0))
+                    items.Add((d.id, d.name, d.kind == DeviceKind.Switch ? "Switch" : "Server",
+                        d.kind == DeviceKind.Switch ? $"{d.ports} ports, {d.uplinkGbps:0}G uplink" : $"{d.heightU}U, {d.cores} cores, {d.storageTB:0} TB{(d.gpus > 0 ? $", {d.gpus} GPU" : "")}, {d.watts:0} W", d.research, d.level));
+            else
+                foreach (var f in Catalog.Facilities.Where(x => x.research > 0 && InTab(x, tab - 1)))
+                    items.Add((f.id, f.name, Catalog.KindName(f.kind), f.desc, f.research, f.level));
+            return items;
+        }
+
         // ---------------------------------------------------------------- finance
         void FinanceWindow(VisualElement p, Scope s)
         {
+            if (Tabs(p, windowSection, "finance", "This month", "History") == 1) { FinanceHistory(p, s); return; }
             var top = K.Row(p);
             top.style.alignItems = Align.FlexStart;
             var left = K.Card(top);
@@ -332,7 +358,10 @@ namespace DCT
             K.Text(s, right, () => { float pue = Sim.itLoadKW > 0 ? Sim.loadKW / Sim.itLoadKW : 0; return $"PUE: {(pue > 0 ? pue.ToString("0.00") : "-")}   IT load {Sim.itLoadKW:0.0} kW (this site)"; });
             K.Text(s, right, () => $"Lifetime revenue: {K.Money(S.lifetimeRevenue)}");
             K.Text(right, $"Seed {S.seed}   {S.difficulty}   {Simulation.Scenario(S.scenario).name}", "dim");
+        }
 
+        void FinanceHistory(VisualElement p, Scope s)
+        {
             K.Text(p, "Monthly operating profit, before construction & hardware (last 12 months)", "bold");
             var chart = new BarChart();
             chart.style.height = 190;
@@ -340,17 +369,27 @@ namespace DCT
             chart.labels = () => S.reports.Skip(Mathf.Max(0, S.reports.Count - 12)).Select(x => $"M{x.month + 1}").ToList();
             p.Add(chart);
             s.Add(chart.Refresh);
-            if (S.reports.Count == 0) K.Text(p, "No completed months yet.", "dim");
+            if (S.reports.Count == 0) { K.Text(p, "No completed months yet.", "dim"); return; }
+            var sv = K.Scroll(p);
+            var hr = K.Row(sv.contentContainer);
+            foreach (var h in new[] { "Month", "Income", "Running costs", "Operating", "Investment", "Cash flow" }) K.Text(hr, h, "bold", "small").style.width = 130;
+            foreach (var rp in Enumerable.Reverse(S.reports.Skip(Mathf.Max(0, S.reports.Count - 24)).ToList()))
+            {
+                var row = K.Row(sv.contentContainer);
+                float income = rp.income + rp.bonuses;
+                K.Text(row, $"Y{rp.month / 12 + 1} M{rp.month % 12 + 1:00}", "small").style.width = 130;
+                K.Text(row, K.Money(income), "small", "good").style.width = 130;
+                K.Text(row, K.Money(income - rp.Operating), "small", "dim").style.width = 130;
+                K.Text(row, K.Money(rp.Operating), "small", rp.Operating >= 0 ? "good" : "bad").style.width = 130;
+                K.Text(row, K.Money(rp.capex), "small", "dim").style.width = 130;
+                K.Text(row, K.Money(rp.Net), "small", rp.Net >= 0 ? "good" : "dim").style.width = 130;
+            }
         }
 
         // ---------------------------------------------------------------- staff & land
         void StaffWindow(VisualElement p, Scope s)
         {
-            var tabs = K.Row(p);
-            K.Btn(s, tabs, () => "Team", () => staffTab = 0, null, () => staffTab == 0).style.width = 110;
-            K.Btn(s, tabs, () => $"Hire ({S.candidates.Count})", () => staffTab = 1, null, () => staffTab == 1).style.width = 110;
-            K.Btn(s, tabs, () => "Land", () => staffTab = 2, null, () => staffTab == 2).style.width = 110;
-            K.Flex(tabs);
+            int staffTab = Tabs(p, windowSection, "staff", out var tabs, $"Team ({S.staff.Count})", $"Hire ({S.candidates.Count})", "Roles", "Land");
             K.Text(s, tabs, () => $"Desks {Sim.deskCount}   Day {Sim.ShiftCount("Day")}  Night {Sim.ShiftCount("Night")}   Payroll {K.Money(S.staff.Sum(m => m.salary))}/mo", "dim");
             var sv = K.Scroll(p);
             var c = sv.contentContainer;
@@ -386,8 +425,8 @@ namespace DCT
             }
             else if (staffTab == 1)
             {
-                K.Text(c, "New candidates arrive every week. Matching a job to the right role makes it 50% faster; skill speeds up all work. Desks are shared between the day (07-19) and night (19-07) shifts.", "dim");
-                foreach (var role in Simulation.Roles) K.Text(c, $"{Simulation.RoleName(role)}: {Simulation.RoleDesc(role)}", "dim");
+                K.Text(c, "New candidates arrive every week. The Roles tab explains what each role does.", "dim");
+                if (S.candidates.Count == 0) K.Text(c, "No candidates right now.", "dim");
                 foreach (var cand in S.candidates.ToList())
                 {
                     var cd = cand;
@@ -400,6 +439,17 @@ namespace DCT
                     float fee = Sim.HireFee(cand);
                     K.Small(s, row, () => $"Hire day ({K.Money(fee)})", () => Report(Sim.HireCandidate(cd, "Day")), () => Sim.ShiftCount("Day") < Sim.deskCount && S.money >= fee);
                     K.Small(s, row, () => "Hire night +15%", () => Report(Sim.HireCandidate(cd, "Night")), () => Sim.ShiftCount("Night") < Sim.deskCount && S.money >= fee);
+                }
+            }
+            else if (staffTab == 2)
+            {
+                K.Text(c, "Matching a job to the right role makes it 50% faster; skill speeds up all work. Desks are shared between the day (07-19) and night (19-07) shifts.", "dim");
+                foreach (var role in Simulation.Roles)
+                {
+                    var row = K.Row(c, "card");
+                    K.Swatch(row, WorldView.RoleColor(role), 12);
+                    K.Text(row, Simulation.RoleName(role), "bold").style.width = 160;
+                    K.Text(row, Simulation.RoleDesc(role), "dim").style.flexShrink = 1;
                 }
             }
             else
@@ -439,10 +489,14 @@ namespace DCT
         // ---------------------------------------------------------------- log
         void LogWindow(VisualElement p, Scope s)
         {
+            int tab = Tabs(p, windowSection, "log", "All", "Problems", "Warnings", "Good news");
             var sv = K.Scroll(p);
-            for (int i = S.log.Count - 1; i >= 0 && i >= S.log.Count - 200; i--)
+            int shown = 0;
+            for (int i = S.log.Count - 1; i >= 0 && shown < 200; i--)
             {
                 var e = S.log[i];
+                if (tab == 1 && e.severity != 3 || tab == 2 && e.severity != 2 || tab == 3 && e.severity != 1) continue;
+                shown++;
                 int d = e.hour / 24;
                 var row = K.Row(sv.contentContainer);
                 row.style.alignItems = Align.FlexStart;
@@ -450,13 +504,27 @@ namespace DCT
                 var l = K.Text(row, e.text, "wrap", e.severity == 3 ? "bad" : e.severity == 2 ? "warn" : e.severity == 1 ? "good" : null);
                 l.style.flexShrink = 1;
             }
+            if (shown == 0) K.Text(sv.contentContainer, "Nothing here yet.", "dim");
         }
 
         // ---------------------------------------------------------------- goals
         void GoalsWindow(VisualElement p, Scope s)
         {
+            int tab = Tabs(p, windowSection, "goals", "Overview", $"Achievements ({S.achievements.Count}/{Simulation.Achievements.Count})");
             var sv = K.Scroll(p);
             var c = sv.contentContainer;
+            if (tab == 1)
+            {
+                foreach (var a in Simulation.Achievements)
+                {
+                    bool got = S.achievements.Contains(a.id), ever = Simulation.UnlockedEver(a.id);
+                    var r = K.Row(c, "card");
+                    K.Text(r, got ? "[*]" : ever ? "[o]" : "[ ]", got ? "good" : "dim").style.width = 30;
+                    K.Text(r, a.name, got ? "bold" : null).style.width = 170;
+                    K.Text(r, a.desc + (ever && !got ? "  (earned in another game)" : ""), "dim");
+                }
+                return;
+            }
             var sc = Simulation.Scenario(S.scenario);
             var card = K.Card(c);
             K.Text(card, $"Scenario: {sc.name}", "bold");
@@ -479,50 +547,46 @@ namespace DCT
             K.Text(ipo, "Go public (IPO)", "bold");
             K.Text(s, ipo, () => S.ipo ? "Your company is publicly traded." : Sim.CanIpo(out string why) ? "You qualify! An IPO raises a year of revenue in cash." : why, "wrap");
             if (!S.ipo) K.Btn(s, ipo, () => "Ring the bell (IPO)", Sim.DoIpo, () => Sim.CanIpo(out _));
-
-            K.Text(c, "ACHIEVEMENTS", "section-title");
-            foreach (var a in Simulation.Achievements)
-            {
-                bool got = S.achievements.Contains(a.id), ever = Simulation.UnlockedEver(a.id);
-                var r = K.Row(c, "card");
-                K.Text(r, got ? "[*]" : ever ? "[o]" : "[ ]", got ? "good" : "dim").style.width = 30;
-                K.Text(r, a.name, got ? "bold" : null).style.width = 170;
-                K.Text(r, a.desc + (ever && !got ? "  (earned in another game)" : ""), "dim");
-            }
         }
 
         // ---------------------------------------------------------------- dashboard
         void DashboardWindow(VisualElement p, Scope s)
         {
             K.Text(s, p, () => $"Last {S.dayStats.Count} days.   PUE {(Sim.itLoadKW > 0 ? (Sim.loadKW / Sim.itLoadKW).ToString("0.00") : "-")}   Solar now {Sim.solarKW:0}/{Sim.solarCapKW:0} kW   Grid price now ${Sim.PowerPriceNow:0.000}/kWh (+${S.city.carbonTax:0.000} carbon)", "dim");
+            int tab = Tabs(p, windowSection, "dashboard", "Business", "Operations");
             var sv = K.Scroll(p);
-            var grid = K.Row(sv.contentContainer);
-            grid.style.alignItems = Align.FlexStart;
-            var left = K.Div(grid, "grow"); left.style.width = Length.Percent(50);
-            var right = K.Div(grid, "grow"); right.style.width = Length.Percent(50); right.style.marginLeft = 8;
-            void Chart(VisualElement col, string title, Func<DayStat, float> f, Color color, string fmt)
+            var col = sv.contentContainer;
+            void Chart(string title, Func<DayStat, float> f, Color color, string fmt)
             {
                 K.Text(col, title, "bold");
                 var ch = new LineChart { color = color, format = fmt, data = () => S.dayStats.Select(f).ToList() };
+                ch.style.height = 150;
                 col.Add(ch);
                 s.Add(ch.Refresh);
             }
-            Chart(left, "Cash", d => d.money, new Color(0.4f, 1f, 0.5f), "${0:N0}");
-            Chart(left, "Monthly recurring revenue", d => d.revenue, new Color(0.4f, 0.7f, 1f), "${0:N0}");
-            Chart(left, "Avg customer service level", d => d.uptime, new Color(1f, 0.85f, 0.3f), "{0:0.0}%");
-            Chart(right, "Facility load (all sites)", d => d.loadKW, new Color(1f, 0.6f, 0.3f), "{0:0} kW");
-            Chart(right, "Daily operating cost", d => d.cost, new Color(1f, 0.4f, 0.4f), "${0:N0}");
-            Chart(right, "Hottest hall", d => d.temp, new Color(1f, 0.5f, 0.2f), "{0:0.0} C");
+            if (tab == 0)
+            {
+                Chart("Cash", d => d.money, new Color(0.4f, 1f, 0.5f), "${0:N0}");
+                Chart("Monthly recurring revenue", d => d.revenue, new Color(0.4f, 0.7f, 1f), "${0:N0}");
+                Chart("Daily operating cost", d => d.cost, new Color(1f, 0.4f, 0.4f), "${0:N0}");
+            }
+            else
+            {
+                Chart("Facility load (all sites)", d => d.loadKW, new Color(1f, 0.6f, 0.3f), "{0:0} kW");
+                Chart("Avg customer service level", d => d.uptime, new Color(1f, 0.85f, 0.3f), "{0:0.0}%");
+                Chart("Hottest hall", d => d.temp, new Color(1f, 0.5f, 0.2f), "{0:0.0} C");
+            }
         }
 
         // ---------------------------------------------------------------- sites
         void SitesWindow(VisualElement p, Scope s)
         {
             var co = Sim.company;
+            var cands = co.SiteCandidates().ToList();
+            int tab = Tabs(p, windowSection, "sites", $"Your sites ({co.sims.Count})", $"Expand ({cands.Count})");
             var sv = K.Scroll(p);
             var c = sv.contentContainer;
-            K.Text(c, "YOUR SITES", "section-title");
-            for (int i = 0; i < co.sims.Count; i++)
+            for (int i = 0; tab == 0 && i < co.sims.Count; i++)
             {
                 var site = co.sims[i];
                 var d = S.sites[i];
@@ -545,9 +609,9 @@ namespace DCT
                 K.Flex(row);
                 if (i != S.activeSite) K.Btn(row, "Go to", () => { OpenWindow(Window.None); gm.SwitchSite(idx); }).style.width = 80;
             }
-            K.Text(c, "EXPAND TO A NEW CITY", "section-title");
+            if (tab == 0) return;
             K.Text(c, $"Each site has its own climate, power prices, grid, land and staff. Contracts can use racks in any site, and geo-redundant customers require racks in at least two. Unlocks at reputation level {Company.MinLevelForSites}.", "dim");
-            foreach (var city in co.SiteCandidates())
+            foreach (var city in cands)
             {
                 var ct = city;
                 float cost = co.SiteCost(city);
@@ -566,9 +630,12 @@ namespace DCT
         // ---------------------------------------------------------------- sandbox
         void SandboxWindow(VisualElement p, Scope s)
         {
+            K.Text(p, "Creative mode: change the rules and poke the simulation. Achievements are disabled for this game.", "dim");
+            int tab = Tabs(p, windowSection, "sandbox", "Rules & Money", "World", "Events");
             var sv = K.Scroll(p);
             var c = sv.contentContainer;
-            K.Text(c, "Creative mode: change the rules and poke the simulation. Achievements are disabled for this game.", "dim");
+            if (tab == 1) { SandboxWorld(c); return; }
+            if (tab == 2) { SandboxEvents(c); return; }
             K.Text(c, "RULES", "section-title");
             void Toggle(string label, Func<bool> get, Action<bool> set) => K.Btn(s, c, () => (get() ? "[x] " : "[ ] ") + label, () => set(!get()), null, get);
             Toggle("Unlimited money", () => S.cheatInfiniteMoney, v => S.cheatInfiniteMoney = v);
@@ -591,8 +658,10 @@ namespace DCT
             K.Text(s, rep, () => $"Rating {S.rating:0}").style.width = 160;
             K.Small(rep, "-10", () => S.rating = Mathf.Max(0, S.rating - 10));
             K.Small(rep, "+10", () => S.rating = Mathf.Min(100, S.rating + 10));
+        }
 
-            K.Text(c, "WORLD", "section-title");
+        void SandboxWorld(VisualElement c)
+        {
             var w = K.Row(c);
             K.Small(w, "New contract offer", Sim.SandboxSpawnOffer);
             K.Small(w, "Repair everything", Sim.SandboxRepairAll);
@@ -604,8 +673,11 @@ namespace DCT
                 var wv = weather;
                 K.Small(wx, wv, () => S.weather = wv);
             }
+        }
 
-            K.Text(c, "TRIGGER EVENT", "section-title");
+        void SandboxEvents(VisualElement c)
+        {
+            K.Text(c, "Trigger an event right now:", "dim");
             var ev = K.Row(c);
             ev.style.flexWrap = Wrap.Wrap;
             foreach (var e in Simulation.SandboxEvents)

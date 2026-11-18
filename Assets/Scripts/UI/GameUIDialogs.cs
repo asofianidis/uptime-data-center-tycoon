@@ -104,9 +104,29 @@ namespace DCT
         void BuildSettings(VisualElement r, Scope s)
         {
             var p = ModalPanel(r, "Settings", 640, 680);
+            int tab = Tabs(p, modalSection, "settings", "Video", "Display & Audio", "Gameplay", "Key bindings");
             var sv = K.Scroll(p);
             var c = sv.contentContainer;
-            BuildVideo(c, s);
+            if (tab == 0) { BuildVideo(c, s); return; }
+            if (tab == 2)
+            {
+                ToggleRow(c, s, "Edge-of-screen panning", () => Settings.EdgePan, v => Settings.EdgePan = v);
+                ToggleRow(c, s, "Monthly autosave", () => Settings.Autosave, v => Settings.Autosave = v);
+                return;
+            }
+            if (tab == 3)
+            {
+                K.Text(c, "Click a binding, then press a key. Esc cancels.", "dim");
+                foreach (var kv in Settings.Defaults)
+                {
+                    var action = kv.Key;
+                    var row = K.Row(c);
+                    K.Text(row, action).style.width = 170;
+                    K.Btn(s, row, () => rebinding == action ? "press a key..." : Settings.KeyName(action), () => { rebinding = action; }, null, () => rebinding == action, "btn-small").style.width = 150;
+                }
+                K.Btn(c, "Reset keys to defaults", () => { Settings.ResetKeys(); rebinding = null; modalSection.Invalidate(); });
+                return;
+            }
             K.Text(c, "DISPLAY", "section-title");
             SliderRow(c, "UI scale", Settings.UiScale, 0.7f, 1.6f, v => Settings.UiScale = v, v => $"x{v:0.00}");
             ToggleRow(c, s, "Day/night cycle", () => Settings.DayNight, v => Settings.DayNight = v);
@@ -116,18 +136,6 @@ namespace DCT
             SliderRow(c, "Master volume", Settings.Master, 0, 1, v => Settings.Master = v, v => $"{v:P0}");
             SliderRow(c, "Music", Settings.Music, 0, 1, v => Settings.Music = v, v => $"{v:P0}");
             SliderRow(c, "Effects", Settings.Sfx, 0, 1, v => Settings.Sfx = v, v => $"{v:P0}");
-            K.Text(c, "GAMEPLAY", "section-title");
-            ToggleRow(c, s, "Edge-of-screen panning", () => Settings.EdgePan, v => Settings.EdgePan = v);
-            ToggleRow(c, s, "Monthly autosave", () => Settings.Autosave, v => Settings.Autosave = v);
-            K.Text(c, "KEY BINDINGS (click, then press a key; Esc cancels)", "section-title");
-            foreach (var kv in Settings.Defaults)
-            {
-                var action = kv.Key;
-                var row = K.Row(c);
-                K.Text(row, action).style.width = 170;
-                K.Btn(s, row, () => rebinding == action ? "press a key..." : Settings.KeyName(action), () => { rebinding = action; }, null, () => rebinding == action, "btn-small").style.width = 150;
-            }
-            K.Btn(c, "Reset keys to defaults", () => { Settings.ResetKeys(); rebinding = null; modalSection.Invalidate(); });
         }
 
         // ---------------------------------------------------------------- video
@@ -200,7 +208,6 @@ namespace DCT
 
         void BuildVideo(VisualElement c, Scope s)
         {
-            K.Text(c, "VIDEO", "section-title");
             ChoiceRow(c, s, "Display mode", () => Settings.DisplayModeNames[pendMode], d => pendMode = (pendMode + d + 3) % 3);
             ChoiceRow(c, s, "Resolution", () => Settings.ResName(pendW, pendH), CycleResolution);
             var row = K.Row(c);
@@ -327,7 +334,20 @@ namespace DCT
         void BuildAchievements(VisualElement r)
         {
             var p = ModalPanel(r, "Achievements (all games)", 640, 620);
+            var scen = Simulation.Scenarios.Where(x => x.days > 0).ToList();
+            int tab = Tabs(p, modalSection, "achievements",
+                $"Achievements ({Simulation.Achievements.Count(a => Simulation.UnlockedEver(a.id))}/{Simulation.Achievements.Count})",
+                $"Scenarios ({scen.Count(sc => Simulation.UnlockedEver("scenario_" + sc.id))}/{scen.Count})");
             var sv = K.Scroll(p);
+            if (tab == 1)
+            {
+                foreach (var sc in scen)
+                {
+                    bool done = Simulation.UnlockedEver("scenario_" + sc.id);
+                    K.Text(sv.contentContainer, (done ? "[*] " : "[ ] ") + sc.name, done ? "good" : "dim");
+                }
+                return;
+            }
             foreach (var a in Simulation.Achievements)
             {
                 bool ever = Simulation.UnlockedEver(a.id);
@@ -336,25 +356,24 @@ namespace DCT
                 K.Text(row, a.name, ever ? "bold" : null).style.width = 170;
                 K.Text(row, a.desc, "dim");
             }
-            K.Text(sv.contentContainer, "SCENARIOS COMPLETED", "section-title");
-            foreach (var sc in Simulation.Scenarios.Where(x => x.days > 0))
-            {
-                bool done = Simulation.UnlockedEver("scenario_" + sc.id);
-                K.Text(sv.contentContainer, (done ? "[*] " : "[ ] ") + sc.name, done ? "good" : "dim");
-            }
         }
 
         // ---------------------------------------------------------------- help
         void BuildHelp(VisualElement r)
         {
             var p = ModalPanel(r, "How to play", 780, 680);
+            // One tab per help topic; the first line of each paragraph is its title.
+            var topics = HelpText.Split(new[] { "\n\n" }, StringSplitOptions.RemoveEmptyEntries).Select(para => para.Split('\n')).ToList();
+            int tab = Tabs(p, modalSection, "help", topics.Select(t => HelpTabName(t[0])).ToArray());
             var sv = K.Scroll(p);
-            foreach (var para in HelpText.Split(new[] { "\n\n" }, StringSplitOptions.RemoveEmptyEntries))
-            {
-                var lines = para.Split('\n');
-                K.Text(sv.contentContainer, lines[0], "section-title");
-                K.Text(sv.contentContainer, string.Join("\n", lines.Skip(1)), "wrap");
-            }
+            K.Text(sv.contentContainer, topics[tab][0], "section-title");
+            K.Text(sv.contentContainer, string.Join("\n", topics[tab].Skip(1)), "wrap");
+        }
+
+        static string HelpTabName(string title)
+        {
+            var t = title.ToLowerInvariant();
+            return char.ToUpperInvariant(t[0]) + t.Substring(1);
         }
 
         const string HelpText =

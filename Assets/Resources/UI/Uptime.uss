@@ -100,3 +100,10 @@
 
 .menu-bg { background-color: rgb(13, 18, 26); }
 .blink-led { position: absolute; width: 4px; height: 2px; }
+
+/* Tab bars (GameUITabs.cs) */
+.tabbar { flex-direction: row; flex-wrap: wrap; align-items: flex-end; flex-shrink: 0; border-bottom-width: 1px; border-color: rgb(64, 82, 102); margin: 4px 0 6px 0; }
+.tabbar > .lbl { margin-left: auto; align-self: center; }
+.btn.tab.unity-button { background-color: rgba(0, 0, 0, 0); border-width: 0; border-bottom-width: 2px; border-color: rgba(0, 0, 0, 0); border-radius: 0; color: rgb(148, 161, 179); font-size: 12px; padding: 5px 10px; margin: 0 2px -1px 0; }
+.btn.tab.unity-button:hover { color: white; background-color: rgba(61, 77, 99, 0.5); }
+.btn.tab.unity-button.on { color: white; border-color: rgb(89, 166, 242); background-color: rgba(31, 107, 179, 0.3); -unity-font-style: bold; }

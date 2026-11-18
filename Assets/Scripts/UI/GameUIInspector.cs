@@ -37,8 +37,15 @@ namespace DCT
             K.Small(head, "x", () => gm.selection.Clear());
             // The inspector is rebuilt whenever its signature changes (buying a device, assigning, cabling...).
             // Keep the scroll position across rebuilds of the same selection so the panel doesn't jump to the top.
-            string selKey = string.Join(",", sel.Select(o => o.id));
+            string selKey = string.Join(",", sel.Select(o => o.id)) + "|" + Tab(sel.Count == 1 ? "insp" : "inspMulti");
             float keepY = inspectorScroll != null && selKey == inspectorScrollKey ? inspectorScroll.scrollOffset.y : 0f;
+            if (sel.Count == 1 && Catalog.Facility(sel[0].def).kind == FacilityKind.Rack)
+            {
+                var o0 = sel[0];
+                Tabs(p, inspectorSection, "insp", "Overview", "Connections", $"Hardware ({o0.devices.Count})", "Install");
+            }
+            else if (sel.Count > 1 && sel.Any(o => Catalog.Facility(o.def).kind == FacilityKind.Rack))
+                Tabs(p, inspectorSection, "inspMulti", "Overview", "Bulk", "Install");
             var sv = K.Scroll(p);
             inspectorScroll = sv;
             inspectorScrollKey = selKey;
@@ -73,6 +80,16 @@ namespace DCT
 
         void RackInspector(VisualElement c, Scope s, PlacedObject o, FacilityDef d)
         {
+            switch (Tab("insp"))
+            {
+                case 1: RackConnections(c, s, o); return;
+                case 2: RackHardware(c, s, o); return;
+                case 3:
+                    K.Text(c, "INSTALL HARDWARE", "section-title");
+                    DeviceShop(c, s, new List<PlacedObject> { o });
+                    TemplatesSection(c, s, new List<PlacedObject> { o });
+                    return;
+            }
             var status = K.Text(s, c, () =>
             {
                 var info = Info(o);
@@ -92,6 +109,41 @@ namespace DCT
             K.Text(s, c, () => { var i = Info(o); return i != null && i.zone >= 0 && i.zone < Sim.zones.Count ? $"Hall temp: {Sim.zones[i.zone].temp:0.0} C" : ""; });
             if (o.floor > 0) K.Text(c, $"On floor {o.floor + 1}", "dim");
 
+            // Customer
+            K.Text(c, "CUSTOMER", "section-title");
+            var con = o.contractId > 0 ? Sim.FindContract(o.contractId) : null;
+            if (con != null)
+            {
+                var row = K.Row(c);
+                K.Swatch(row, Catalog.CustomerColors[con.colorIdx]);
+                K.Text(row, $"{con.customer} ({Catalog.TypeName(con.type)})", "bold");
+                if (con.type == ContractType.Colocation) K.Text(c, $"Customer gear: {con.reqKWPerRack:0} kW in this rack (they bring their own servers)", "dim");
+                var b = K.Row(c);
+                K.Small(b, "Unassign", () => Sim.Assign(o, null));
+                K.Small(b, "View contract", () => { OpenWindow(Window.Contracts); gm.view.highlightContract = con.id; });
+            }
+            else AssignButtons(c, s, new List<PlacedObject> { o });
+
+            // Quick health summary of the other tabs, so problems are visible without switching.
+            K.Text(c, "CHECKS", "section-title");
+            var chk = K.Text(s, c, () =>
+            {
+                var lines = new List<string>();
+                if (o.linkCore <= 0) lines.Add("Not cabled to a core switch (Connections tab)");
+                var gap = Sim.RedundancyGap(o);
+                if (gap != null) lines.Add("Redundancy: " + gap);
+                var i = Info(o);
+                if (i != null && i.airflow > 1.001f) lines.Add($"Airflow: {i.airflowNote}");
+                if (o.devices.Any(x => x.failed)) lines.Add($"{o.devices.Count(x => x.failed)} failed device(s) (Hardware tab)");
+                return lines.Count == 0 ? "All good" : string.Join("\n", lines);
+            }, "wrap");
+            K.DynClass(s, chk, () => chk.text == "All good" ? "good" : "dim");
+            K.Space(c, 8);
+            K.Btn(c, $"Remove rack (refund {K.Money(Sim.RemovalRefund(o))})", ConfirmRemoveSelection);
+        }
+
+        void RackConnections(VisualElement c, Scope s, PlacedObject o)
+        {
             // Airflow
             K.Text(c, "AIRFLOW", "section-title");
             var air = K.Text(s, c, () => { var i = Info(o); return i == null ? "" : $"{i.airflowNote}  (heat x{i.airflow:0.00})"; }, "wrap");
@@ -143,24 +195,12 @@ namespace DCT
                 K.Small(row, "Pick core switch...", () => gm.BeginConnect(o));
             }
 
-            // Customer
-            K.Text(c, "CUSTOMER", "section-title");
-            var con = o.contractId > 0 ? Sim.FindContract(o.contractId) : null;
-            if (con != null)
-            {
-                var row = K.Row(c);
-                K.Swatch(row, Catalog.CustomerColors[con.colorIdx]);
-                K.Text(row, $"{con.customer} ({Catalog.TypeName(con.type)})", "bold");
-                if (con.type == ContractType.Colocation) K.Text(c, $"Customer gear: {con.reqKWPerRack:0} kW in this rack (they bring their own servers)", "dim");
-                var b = K.Row(c);
-                K.Small(b, "Unassign", () => Sim.Assign(o, null));
-                K.Small(b, "View contract", () => { OpenWindow(Window.Contracts); gm.view.highlightContract = con.id; });
-            }
-            else AssignButtons(c, s, new List<PlacedObject> { o });
+        }
 
-            // Hardware
+        void RackHardware(VisualElement c, Scope s, PlacedObject o)
+        {
             K.Text(c, "INSTALLED HARDWARE", "section-title");
-            if (o.devices.Count == 0) K.Text(c, "Nothing installed.", "dim");
+            if (o.devices.Count == 0) K.Text(c, "Nothing installed - see the Install tab.", "dim");
             foreach (var dev in o.devices.OrderByDescending(x => x.u).ToList())
             {
                 var dd = Catalog.Device(dev.def);
@@ -184,12 +224,6 @@ namespace DCT
                 }
                 K.Small(row, "Sell", () => Sim.RemoveDevice(o, dv));
             }
-
-            TemplatesSection(c, s, new List<PlacedObject> { o });
-            K.Text(c, "INSTALL HARDWARE", "section-title");
-            DeviceShop(c, s, new List<PlacedObject> { o });
-            K.Space(c, 8);
-            K.Btn(c, $"Remove rack (refund {K.Money(Sim.RemovalRefund(o))})", ConfirmRemoveSelection);
         }
 
         void Report(string err) { if (err != null) Toast(err, 2); }
@@ -378,6 +412,14 @@ namespace DCT
                 K.Btn(c, "Remove selected", ConfirmRemoveSelection);
                 return;
             }
+            int tab = Tab("inspMulti");
+            if (tab == 2)
+            {
+                K.Text(c, "INSTALL IN EACH RACK", "section-title");
+                DeviceShop(c, s, racks);
+                return;
+            }
+            if (tab == 1) { MultiBulk(c, s, racks); return; }
             var st = K.Text(s, c, () => $"{racks.Count} racks, {racks.Count(r => Info(r)?.online ?? false)} online");
             K.DynClass(s, st, () => racks.All(r => Info(r)?.online ?? false) ? "good" : "warn");
             K.Text(s, c, () => $"Total load: {racks.Sum(r => Info(r)?.loadKW ?? 0):0.0} kW");
@@ -392,7 +434,12 @@ namespace DCT
             K.Text(c, "CUSTOMER", "section-title");
             AssignButtons(c, s, racks);
             K.Small(c, "Unassign all", () => { foreach (var r in racks) Sim.Assign(r, null); });
+            K.Space(c, 8);
+            K.Btn(c, "Remove selected", ConfirmRemoveSelection);
+        }
 
+        void MultiBulk(VisualElement c, Scope s, List<PlacedObject> racks)
+        {
             K.Text(c, "BULK", "section-title");
             var brow = K.Row(c);
             K.Small(brow, "Make all redundant", () => { foreach (var r in racks) { var e = Sim.MakeRedundant(r); if (e != null) { Toast(e, 2); break; } } });
@@ -413,10 +460,6 @@ namespace DCT
                 }, () => empties > 0 && S.money >= cost);
             }
             TemplatesSection(c, s, racks);
-            K.Text(c, "INSTALL IN EACH RACK", "section-title");
-            DeviceShop(c, s, racks);
-            K.Space(c, 8);
-            K.Btn(c, "Remove selected", ConfirmRemoveSelection);
         }
     }
 }
