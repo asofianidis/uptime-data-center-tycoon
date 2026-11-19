@@ -8,3 +8,15 @@
 *.sln
 *.slnx
 .vs/
+
+# === Claude Code Game Studios (local/runtime) ===
+.claude/settings.local.json
+CLAUDE.local.md
+project.local.yaml
+production/session-logs/
+production/session-state/*
+!production/session-state/.gitkeep
+.scratch/
+.claude/agent-memory/
+.claude/worktrees/
+/test-results/
