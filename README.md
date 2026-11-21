@@ -93,18 +93,3 @@ Space pause · 1-4 speed · F5/F9 quick save/load · Shift+click or box-drag to 
 `Assets/Resources/Data/catalog.json` overrides the equipment defined in `Defs.cs` (costs, power, cooling,
 ports, research levels, etc.). Edit it and restart the game. `kind` and `room` are enum numbers
 (see `Defs.cs`). Delete the file to fall back to the in-code catalog; re-export with **Uptime → Export Catalog JSON**.
-
-## Regenerating the 3D models
-```
-"C:\Program Files\Blender Foundation\Blender 5.2\blender.exe" -b --factory-startup -P Tools/blender/make_models.py -- "<project>/Assets/Resources/Models"
-```
-Add model names after the output folder to rebuild only those (e.g. `... -- "<out>" rack_std tree_pine`).
-Every facility, the three rack cabinets, staff, trees and rocks have models. A facility uses the model named by its
-`model` field, or its `id` when that is empty. Rack shells, trees, rocks and placement previews are baked into the
-game's vertex-colored meshes at runtime, so the models are imported with Read/Write enabled
-(`Assets/Editor/ModelImportSettings.cs`). Anything without a model falls back to a procedural mesh.
-
-To eyeball the models without opening Unity, render a preview PNG of each:
-```
-"C:\Program Files\Blender Foundation\Blender 5.2\blender.exe" -b --factory-startup -P Tools/blender/render_previews.py -- Assets/Resources/Models <out_dir>
-```
