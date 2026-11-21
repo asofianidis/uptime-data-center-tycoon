@@ -108,11 +108,3 @@ To eyeball the models without opening Unity, render a preview PNG of each:
 ```
 "C:\Program Files\Blender Foundation\Blender 5.2\blender.exe" -b --factory-startup -P Tools/blender/render_previews.py -- Assets/Resources/Models <out_dir>
 ```
-
-## Continuous integration
-`.github/workflows/tests.yml` runs the edit-mode tests with [GameCI](https://game.ci) on every push.
-It needs Unity license secrets in the repo settings (Settings → Secrets and variables → Actions):
-`UNITY_LICENSE` (contents of a `.ulf` license file) and/or `UNITY_EMAIL` + `UNITY_PASSWORD`.
-See https://game.ci/docs/github/activation. Without them the workflow skips the tests with a notice.
-
-Saves live in `%USERPROFILE%/AppData/LocalLow/Uptime/Uptime - Data Center Tycoon/` (slot 0 = monthly autosave).
